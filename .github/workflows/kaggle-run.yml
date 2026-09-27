@@ -1,0 +1,91 @@
+name: Kaggle run
+
+# Manual button (Actions tab -> Kaggle run -> Run workflow). GitHub only ships code; the heavy
+# generation + vcc prep runs on Kaggle's free CPU machine. Needs repo secrets KAGGLE_USERNAME and
+# KAGGLE_KEY, and a private Kaggle dataset <user>/vcc-data holding controls/ + vcc-perturb.csv.
+# Submitting to VCC stays manual.
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: Model to build
+        type: choice
+        options: [b4, b2]
+        default: b4
+      prep:
+        description: "vcc prep: dry-run only, or also write the .vcc file"
+        type: choice
+        options: [dry-run, full]
+        default: dry-run
+      wait:
+        description: Wait for Kaggle to finish (uses GitHub Actions minutes while polling)
+        type: boolean
+        default: true
+
+concurrency: kaggle-run
+
+jobs:
+  kaggle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - run: pip install kaggle
+
+      - name: Upload code as Kaggle dataset <user>/vcc-code
+        run: |
+          mkdir -p /tmp/code
+          git archive HEAD | tar -x -C /tmp/code
+          cat > /tmp/code/dataset-metadata.json <<EOF
+          {"title": "vcc-code", "id": "${KAGGLE_USERNAME}/vcc-code", "licenses": [{"name": "other"}]}
+          EOF
+          if kaggle datasets status "${KAGGLE_USERNAME}/vcc-code" >/dev/null 2>&1; then
+            kaggle datasets version -p /tmp/code -m "${GITHUB_SHA::7}" --dir-mode zip
+          else
+            kaggle datasets create -p /tmp/code --dir-mode zip
+          fi
+          # wait until the new version is ready before the kernel mounts it
+          for i in $(seq 1 60); do
+            s=$(kaggle datasets status "${KAGGLE_USERNAME}/vcc-code" || true); echo "$s"
+            [ "$s" = "ready" ] && break; sleep 10
+          done
+
+      - name: Push kernel <user>/vcc-run
+        run: |
+          mkdir -p /tmp/kernel
+          sed -e "s/__MODEL__/${{ inputs.model }}/" -e "s/__PREP__/${{ inputs.prep }}/" \
+            kaggle/run_kaggle.py > /tmp/kernel/run_kaggle.py
+          cat > /tmp/kernel/kernel-metadata.json <<EOF
+          {
+            "id": "${KAGGLE_USERNAME}/vcc-run",
+            "title": "vcc-run",
+            "code_file": "run_kaggle.py",
+            "language": "python",
+            "kernel_type": "script",
+            "is_private": true,
+            "enable_gpu": false,
+            "enable_internet": true,
+            "dataset_sources": ["${KAGGLE_USERNAME}/vcc-code", "${KAGGLE_USERNAME}/vcc-data"]
+          }
+          EOF
+          kaggle kernels push -p /tmp/kernel
+          echo "Kernel: https://www.kaggle.com/code/${KAGGLE_USERNAME}/vcc-run" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Wait for Kaggle to finish
+        if: inputs.wait
+        run: |
+          while true; do
+            s=$(kaggle kernels status "${KAGGLE_USERNAME}/vcc-run"); echo "$(date -u +%H:%M) $s"
+            case "$s" in
+              *complete*) echo "Kaggle run complete" >> "$GITHUB_STEP_SUMMARY"; break ;;
+              *error*|*cancel*) echo "Kaggle run failed -- see the kernel log" >> "$GITHUB_STEP_SUMMARY"; exit 1 ;;
+            esac
+            sleep 120
+          done

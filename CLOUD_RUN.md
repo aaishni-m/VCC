@@ -12,7 +12,22 @@ Code lives in git; data never does (see `.gitignore`). The heavy steps need roug
 | **Google Cloud free trial** | $300 credit for 90 days, card needed | e.g. e2-highmem-4 (32 GB) | Not charged unless you manually upgrade. **Stop the VM when you're done.** |
 | GitHub Actions | Free | ~16 GB RAM, ~14 GB disk | Too small for `vcc prep` / the output. Fine for linting and the LOO scripts only. |
 
-## Kaggle workflow
+## GitHub Actions (recommended: no notebook clicking)
+
+- **CI** (`.github/workflows/ci.yml`) runs on every push: lint + unit tests on synthetic data.
+- **Kaggle run** (`.github/workflows/kaggle-run.yml`) is a manual button. It uploads the repo to Kaggle
+  as dataset `<user>/vcc-code`, then runs `kaggle/run_kaggle.py` on Kaggle's free CPU machine. That script
+  runs the model, then `vcc prep` (dry-run, or full). The `.vcc` lands in the kernel's Output tab.
+
+One-time setup:
+1. On Kaggle: **Settings -> API -> Create New Token** (downloads `kaggle.json` with username + key).
+2. On GitHub: **repo Settings -> Secrets and variables -> Actions**, add `KAGGLE_USERNAME` and `KAGGLE_KEY`.
+3. On Kaggle: create a **private** dataset with slug `vcc-data` containing `controls/` and `vcc-perturb.csv`.
+4. On Kaggle: verify your phone number so kernels can use the internet (needed to install `vcc-cli`).
+
+Then: **Actions -> Kaggle run -> Run workflow**. Submit the resulting `.vcc` yourself.
+
+## Kaggle workflow (manual notebook alternative)
 
 1. Create a **private Kaggle Dataset** named `vcc-data` with `controls/` (the 3 context `.h5ad` files,
    `gene_names.csv`, `pert_counts.csv`, `manifest.json`) and `vcc-perturb.csv`.
