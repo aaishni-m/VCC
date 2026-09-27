@@ -20,8 +20,13 @@ Code lives in git; data never does (see `.gitignore`). The heavy steps need roug
   runs the model, then `vcc prep` (dry-run, or full). The `.vcc` lands in the kernel's Output tab.
 
 One-time setup:
-1. On Kaggle: **Settings -> API -> Create New Token** (downloads `kaggle.json` with username + key).
-2. On GitHub: **repo Settings -> Secrets and variables -> Actions**, add `KAGGLE_USERNAME` and `KAGGLE_KEY`.
+1. On Kaggle: **Settings -> API -> Create New Token** (an access token string).
+2. On GitHub: **repo Settings -> Secrets and variables -> Actions**, add `KAGGLE_USERNAME` (`aaishnimulik`)
+   and `KAGGLE_API_TOKEN`.
+
+Locally on Windows the token lives in `C:\Users\User\.kaggle\access_token` (no `.txt`). Run the CLI as
+`uvx --python 3.12 kaggle ...` (Python 3.10 only gets the old CLI), and pass `-p .` from inside the
+folder -- absolute `C:/...` paths break its uploader.
 3. On Kaggle: create a **private** dataset with slug `vcc-data` containing `controls/` and `vcc-perturb.csv`.
 4. On Kaggle: verify your phone number so kernels can use the internet (needed to install `vcc-cli`).
 

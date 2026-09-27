@@ -2,7 +2,7 @@ name: Kaggle run
 
 # Manual button (Actions tab -> Kaggle run -> Run workflow). GitHub only ships code; the heavy
 # generation + vcc prep runs on Kaggle's free CPU machine. Needs repo secrets KAGGLE_USERNAME and
-# KAGGLE_KEY, and a private Kaggle dataset <user>/vcc-data holding controls/ + vcc-perturb.csv.
+# KAGGLE_API_TOKEN (Kaggle Settings -> API -> Create New Token), and a private Kaggle dataset <user>/vcc-data holding controls/ + vcc-perturb.csv.
 # Submitting to VCC stays manual.
 
 on:
@@ -31,12 +31,12 @@ jobs:
     timeout-minutes: 360
     env:
       KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
-      KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.12"   # kaggle CLI 2.x (access tokens) needs Python >= 3.11
       - run: pip install kaggle
 
       - name: Upload code as Kaggle dataset <user>/vcc-code
