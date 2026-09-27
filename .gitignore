@@ -1,0 +1,22 @@
+# Large / regenerable data -- keep off GitHub (100MB file limit); store on Kaggle/cloud disk instead
+outputs/
+*.h5ad
+*.vcc
+*.zip
+*.npy
+vcc-perturb.csv
+vcc-perturb.csv.*.part
+data/raw/
+data/replogle_check/
+
+# Unrelated documents
+Claude outputs/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Secrets
+.env
+*.token
