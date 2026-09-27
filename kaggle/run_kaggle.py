@@ -13,7 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-MODEL = "__MODEL__"   # replaced by the workflow (b2 | b4)
+MODEL = "__MODEL__"   # replaced by the workflow (b2 | b4 | b5)
 PREP = "__PREP__"     # "dry-run" or "full"
 
 
@@ -44,8 +44,8 @@ env = dict(os.environ,
            VCC_OUTPUTS_DIR="/kaggle/temp/outputs")   # 14 GB .h5ad stays off the 20 GB working dir
 
 run([sys.executable, "-m", "pip", "install", "-q", "anndata", "uv"])
-if MODEL == "b4":
-    run([sys.executable, "models/gene_transfer_b4.py"], cwd=code_dir, env=env)
+if MODEL in ("b4", "b5"):
+    run([sys.executable, f"models/gene_transfer_{MODEL}.py"], cwd=code_dir, env=env)   # b5 finds external_profiles.npz under /kaggle/input
 run([sys.executable, "models/generate_b2_submission.py", "--model", MODEL], cwd=code_dir, env=env)
 
 run(["uv", "tool", "install", "vcc-cli"], env=env)

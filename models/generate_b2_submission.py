@@ -53,6 +53,7 @@ peak disk usage is essentially just that final size, comfortably inside the sand
 Usage:
     python models/generate_b2_submission.py              # B2 (unchanged, reproducible)
     python models/generate_b2_submission.py --model b4   # B4: profiles from gene_transfer_b4.py
+    python models/generate_b2_submission.py --model b5   # B5: profiles from gene_transfer_b5.py
 """
 import argparse
 import gc
@@ -220,15 +221,15 @@ def append_csr_chunk(f: h5py.File, X_chunk: sp.csr_matrix, state: dict) -> None:
     state["rows"] += X_chunk.shape[0]
 
 
-def load_b4_profiles(target_genes):
-    """B4 z-profiles (built and LOO-validated by gene_transfer_b4.py): real rows for the 13 measured
-    genes; mean response + median self-knockdown for the rest. All genes use BETA_REAL, since the
-    mean's scale was already fitted in z-space by the LOO sweep."""
-    meta = json.loads((cfg.PROJECT_ROOT / "models" / "b4_meta.json").read_text())
-    assert meta["target_genes"] == target_genes, "b4_meta.json target order differs from pert_counts.csv"
-    profiles = np.load(cfg.PROJECT_ROOT / "models" / "b4_profiles.npy").astype(np.float64)
-    print(f"[B4-gen] target-gene z-profiles: {sum(meta['is_real'])} real, "
-          f"{len(target_genes) - sum(meta['is_real'])} mean*{meta['mean_scale']} + self-knockdown")
+def load_saved_profiles(model, target_genes):
+    """z-profiles saved by gene_transfer_b4.py / gene_transfer_b5.py (real rows for the 13 measured genes,
+    model-specific profiles for the rest). All genes use BETA_REAL: each model's z-space scale was already
+    fitted by its own LOO sweep."""
+    meta = json.loads((cfg.PROJECT_ROOT / "models" / f"{model}_meta.json").read_text())
+    assert meta["target_genes"] == [g.strip() for g in target_genes], f"{model}_meta.json target order differs"
+    profiles = np.load(cfg.PROJECT_ROOT / "models" / f"{model}_profiles.npy").astype(np.float64)
+    print(f"[{model.upper()}-gen] target-gene z-profiles: {sum(meta['is_real'])} real, "
+          f"{len(target_genes) - sum(meta['is_real'])} modelled")
     return profiles, np.full(len(target_genes), BETA_REAL)
 
 
@@ -263,8 +264,8 @@ def main(model="b2"):
     combined_obs = build_combined_obs(target_genes)
     assert combined_obs.shape[0] == n_obs_total
 
-    if model == "b4":
-        z_matrix_vp, gene_betas = load_b4_profiles(target_genes)
+    if model in ("b4", "b5"):
+        z_matrix_vp, gene_betas = load_saved_profiles(model, target_genes)
     else:
         z_matrix_vp, real_mask = predict_all_target_z_profiles(target_genes, targets, gene_cols, R)
         gene_betas = np.where(real_mask, BETA_REAL, BETA_MEAN)
@@ -335,5 +336,5 @@ def main(model="b2"):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", choices=["b2", "b4"], default="b2")
+    parser.add_argument("--model", choices=["b2", "b4", "b5"], default="b2")
     main(parser.parse_args().model)

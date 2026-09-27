@@ -18,20 +18,25 @@ Outputs in /kaggle/working: external_results.json, external_profiles.npz (center
 targets in vcc-perturb gene space, NaN where a source lacks the target, plus full-data fitted scales).
 """
 import json
+import os
 import subprocess
 import sys
 import time
+from importlib.metadata import version
 from pathlib import Path
 
-import numpy as np
-import pandas as pd
+# Install BEFORE importing numpy, and pin numpy/scipy/pandas to Kaggle's versions -- letting pip upgrade
+# numpy under an already-imported numpy broke the first run.
+pins = [f"{p}=={version(p)}" for p in ("numpy", "scipy", "pandas")]
+subprocess.run([sys.executable, "-m", "pip", "install", "-q", "anndata", "fsspec", "aiohttp", "requests", *pins],
+               check=True)
+
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
 
 code_dir = next(Path("/kaggle/input").rglob("config.py")).parent
 sys.path.insert(0, str(code_dir))
-import os  # noqa: E402
-
 os.environ["VCC_PERTURB_CSV"] = str(next(Path("/kaggle/input").rglob("vcc-perturb.csv")))
-subprocess.run([sys.executable, "-m", "pip", "install", "-q", "anndata", "fsspec", "aiohttp", "requests"], check=True)
 
 import anndata as ad  # noqa: E402
 import fsspec  # noqa: E402
@@ -80,11 +85,17 @@ for name, fid in REPLOGLE.items():
     path = TMP / f"{name}.h5ad"
     if not path.exists():
         log(f"downloading Replogle {name}")
-        with requests.get(f"https://plus.figshare.com/ndownloader/files/{fid}", stream=True, timeout=600) as r:
+        # ndownloader.figshare.com redirects to a short-lived signed S3 URL; plus.figshare.com returns an HTML stub
+        with requests.get(f"https://ndownloader.figshare.com/files/{fid}", stream=True, timeout=600) as r:
             r.raise_for_status()
             with open(path, "wb") as f:
                 for chunk in r.iter_content(1 << 23):
                     f.write(chunk)
+        with open(path, "rb") as f:
+            if f.read(4)[1:] != b"HDF":  # HDF5 files start with byte 0x89 then "HDF"
+                path.unlink()
+                sys.exit(f"Replogle {name} download is not an HDF5 file")
+        log(f"{name}: downloaded {path.stat().st_size / 1e6:.0f} MB")
     a = ad.read_h5ad(path)
     log(f"{name}: {a.shape}; obs cols {list(a.obs.columns)[:12]}; var cols {list(a.var.columns)[:6]}")
     obs_gene = (a.obs[symbol_col(a.obs, ["gene", "gene_name", "target_gene"])].astype(str) if
@@ -93,6 +104,8 @@ for name, fid in REPLOGLE.items():
     var_gene = (a.var[symbol_col(a.var, ["gene_name", "gene_symbol"])].astype(str).tolist()
                 if any(c in a.var.columns for c in ["gene_name", "gene_symbol"]) else a.var_names.tolist())
     X = np.asarray(a.X.todense() if hasattr(a.X, "todense") else a.X, dtype=np.float32)
+    X[~np.isfinite(X)] = 0            # zero-variance genes come out as NaN/inf in Replogle's normalized bulk
+    X = np.clip(X, -50, 50)
     keep = ~obs_gene.str.lower().str.contains("non-targeting").to_numpy()
     screen_mean = to_vp_space(X[keep].mean(0, keepdims=True), var_gene)[0]
     rows = {}
@@ -202,8 +215,9 @@ for src in profiles:
         f"{'PASS' if r['passes_gate'] else 'fail'}")
 
 (WORK / "external_results.json").write_text(json.dumps(results, indent=2))
-out = {"targets": np.array(targets300), "vp_genes": np.array(vp_genes)}
+out = {"targets": np.array(targets300), "vp_genes": np.array(vp_genes), "vp_targets": np.array(vp_targets)}
 for src, (rows, mean) in profiles.items():
+    out[f"Dvp_{src}"] = centered_rows(src)[0]   # the 150 vcc-perturb knockdowns (zeros where missing), for local analysis
     out[f"D_{src}"] = np.stack([rows[g] - mean if g in rows else np.full(len(vp_genes), np.nan, np.float32)
                                 for g in targets300]).astype(np.float32)
     out[f"scale_{src}"] = np.float32(fitted_scale.get(src, np.nan))

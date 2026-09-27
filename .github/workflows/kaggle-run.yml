@@ -11,8 +11,8 @@ on:
       model:
         description: Model to build
         type: choice
-        options: [b4, b2]
-        default: b4
+        options: [b5, b4, b2]
+        default: b5
       prep:
         description: "vcc prep: dry-run only, or also write the .vcc file"
         type: choice
@@ -72,7 +72,8 @@ jobs:
             "is_private": true,
             "enable_gpu": false,
             "enable_internet": true,
-            "dataset_sources": ["${KAGGLE_USERNAME}/vcc-code", "${KAGGLE_USERNAME}/vcc-data"]
+            "dataset_sources": ["${KAGGLE_USERNAME}/vcc-code", "${KAGGLE_USERNAME}/vcc-data"],
+            "kernel_sources": ["${KAGGLE_USERNAME}/vcc-external"]
           }
           EOF
           kaggle kernels push -p /tmp/kernel
