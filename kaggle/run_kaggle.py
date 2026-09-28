@@ -48,12 +48,21 @@ for step in {"b4": ["b4"], "b5": ["b5"], "b6": ["b5", "b6"]}.get(MODEL, []):
     run([sys.executable, f"models/gene_transfer_{step}.py"], cwd=code_dir, env=env)   # b5 finds external_profiles.npz under /kaggle/input
 run([sys.executable, "models/generate_b2_submission.py", "--model", MODEL], cwd=code_dir, env=env)
 
-run(["uv", "tool", "install", "vcc-cli"], env=env)
+VCC_CLI = "vcc-cli==0.2.2"   # stream_package.py mirrors this version's prep; bump both together
+run(["uv", "tool", "install", VCC_CLI], env=env)
 vcc = str(Path.home() / ".local" / "bin" / "vcc")
-prep = [vcc, "prep", f"/kaggle/temp/outputs/{MODEL}_submission.h5ad",
-        "-g", str(controls / "gene_names.csv"), "--perts", str(controls / "pert_counts.csv"),
-        "-o", f"/kaggle/working/{MODEL}_submission.vcc"]
-run(prep + ["--dry-run"], env=env)
-if PREP == "full":
-    run(prep, env=env)
+src = f"/kaggle/temp/outputs/{MODEL}_submission.h5ad"
+genes, perts = str(controls / "gene_names.csv"), str(controls / "pert_counts.csv")
+out = f"/kaggle/working/{MODEL}_submission.vcc"
+if MODEL == "b6":
+    # too dense for `vcc prep` on 30 GiB (see models/stream_package.py): package in a streaming way, after a
+    # self-test that requires byte-level agreement with real `vcc prep` on a subset
+    run([sys.executable, "-m", "pip", "install", "-q", VCC_CLI, "zstandard"])
+    run([sys.executable, "models/stream_package.py", src, out, "--genes", genes, "--perts", perts, "--selftest"],
+        cwd=code_dir, env=env)
+else:
+    prep = [vcc, "prep", src, "-g", genes, "--perts", perts, "-o", out]
+    run(prep + ["--dry-run"], env=env)
+    if PREP == "full":
+        run(prep, env=env)
 print("done")
