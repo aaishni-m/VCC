@@ -122,8 +122,9 @@ def write_vcc(pred_h5ad: Path, out: Path, nnz: int, n_obs: int, n_vars: int) -> 
             tar.add(zst, arcname=PRED_MEMBER, filter=normalize)
 
 
-def package(src: Path, out: Path, genes: str, perts: str, full_panel: bool = True) -> None:
-    pred = out.with_suffix(".pred.h5ad")
+def package(src: Path, out: Path, genes: str, perts: str, full_panel: bool = True, workdir: Path | None = None) -> None:
+    # intermediates (a ~17 GB pred.h5ad and its .zst) go next to SRC, not next to OUT: Kaggle's output dir is 20 GB
+    pred = (workdir or src.parent) / (out.stem + ".pred.h5ad")
     nnz = write_minimal(src, pred)
     validate(pred, genes, perts, full_panel)
     with h5py.File(pred, "r") as f:
