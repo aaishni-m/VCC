@@ -57,8 +57,10 @@ out = f"/kaggle/working/{MODEL}_submission.vcc"
 if MODEL == "b6":
     # too dense for `vcc prep` on 30 GiB (see models/stream_package.py): package in a streaming way, after a
     # self-test that requires byte-level agreement with real `vcc prep` on a subset
-    run([sys.executable, "-m", "pip", "install", "-q", VCC_CLI, "zstandard"])
-    run([sys.executable, "models/stream_package.py", src, out, "--genes", genes, "--perts", perts, "--selftest"],
+    # run inside vcc-cli's own tool environment, so anndata/pandas/h5py are exactly the ones `vcc prep` uses
+    run(["uv", "tool", "install", "--force", VCC_CLI, "--with", "zstandard"], env=env)
+    vcc_python = str(Path.home() / ".local" / "share" / "uv" / "tools" / "vcc-cli" / "bin" / "python")
+    run([vcc_python, "models/stream_package.py", src, out, "--genes", genes, "--perts", perts, "--selftest"],
         cwd=code_dir, env=env)
 else:
     prep = [vcc, "prep", src, "-g", genes, "--perts", perts, "-o", out]
