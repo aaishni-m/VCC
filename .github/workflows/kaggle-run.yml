@@ -11,8 +11,8 @@ on:
       model:
         description: Model to build
         type: choice
-        options: [b5, b4, b2]
-        default: b5
+        options: [b6, b5, b4, b2]
+        default: b6
       prep:
         description: "vcc prep: dry-run only, or also write the .vcc file"
         type: choice

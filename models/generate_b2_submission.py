@@ -54,6 +54,7 @@ Usage:
     python models/generate_b2_submission.py              # B2 (unchanged, reproducible)
     python models/generate_b2_submission.py --model b4   # B4: profiles from gene_transfer_b4.py
     python models/generate_b2_submission.py --model b5   # B5: profiles from gene_transfer_b5.py
+    python models/generate_b2_submission.py --model b6   # B6: top-K of B5, sparse T4 transform (gene_transfer_b6.py)
 """
 import argparse
 import gc
@@ -72,7 +73,7 @@ import json
 import config as cfg
 from models.gene_transfer_b2 import load_response_matrix
 from models.pseudobulk_reference import load_or_build
-from models.transform_candidates import t2_log1p_additive
+from models.transform_candidates import t2_log1p_additive, t4_sparse_thinning
 
 CHUNK_GENES = 15          # matches control_baseline.py's chunk size
 BETA_REAL = 1.5           # beta for the 13/300 genes with real vcc-perturb z-score profiles
@@ -264,13 +265,14 @@ def main(model="b2"):
     combined_obs = build_combined_obs(target_genes)
     assert combined_obs.shape[0] == n_obs_total
 
-    if model in ("b4", "b5"):
+    if model in ("b4", "b5", "b6"):
         z_matrix_vp, gene_betas = load_saved_profiles(model, target_genes)
     else:
         z_matrix_vp, real_mask = predict_all_target_z_profiles(target_genes, targets, gene_cols, R)
         gene_betas = np.where(real_mask, BETA_REAL, BETA_MEAN)
     z_matrix_full = align_z_matrix_to_context(z_matrix_vp, gene_cols, context_genes)  # (300, 18533)
 
+    transform = t4_sparse_thinning if model == "b6" else t2_log1p_additive  # b6: see gene_transfer_b6.py
     out_path = cfg.OUTPUTS / f"{model}_submission.h5ad"
     print(f"[B2-gen] initializing combined output file at {out_path} "
           f"(shape=({n_obs_total}, {cfg.N_GENES})) ...")
@@ -297,7 +299,7 @@ def main(model="b2"):
                     idx = rng.choice(n_control, size=cfg.CELLS_PER_PERT, replace=True)
                     baseline_batch = X_src[idx]
                     z_full = z_matrix_full[start + gi]
-                    synth = t2_log1p_additive(baseline_batch, z_full, ref, rng, beta=gene_betas[start + gi])
+                    synth = transform(baseline_batch, z_full, ref, rng, beta=gene_betas[start + gi])
                     chunk_blocks.append(synth.astype(np.float32))
                 X_pred = np.vstack(chunk_blocks)
                 X_chunk_csr = sp.csr_matrix(X_pred)
@@ -336,5 +338,5 @@ def main(model="b2"):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", choices=["b2", "b4", "b5"], default="b2")
+    parser.add_argument("--model", choices=["b2", "b4", "b5", "b6"], default="b2")
     main(parser.parse_args().model)

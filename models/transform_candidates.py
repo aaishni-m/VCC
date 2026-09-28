@@ -134,6 +134,34 @@ def t3_quantile(baseline_counts, z_profile, ref, rng, gamma=1.0, sorted_ref=None
     return _renorm_and_redraw(baseline_counts, out, rng)
 
 
+def t4_sparse_thinning(baseline_counts, z_profile, ref, rng, beta=1.0, max_fold=20.0):
+    """Edits ONLY genes with a non-zero z; every other gene keeps the real control cell's exact counts.
+
+    Why: T1-T3 redraw every gene of every cell from a multinomial. That keeps each gene's mean but turns
+    many 1-counts into 0s, which the official Wilcoxon DE test reads as a decrease -- measured on context A,
+    a z=0 (no-effect) T2 run already gets ~7,200 of 9,929 tested genes called significant vs the real
+    controls, while untouched resampled controls get 0. Those artifact calls swamp the DE metrics.
+
+    Fold per gene f_g = exp(beta * z_g * sigma_g) -- the same log1p(CP10K) shift T2 applies, read as a fold.
+      f < 1: binomial thinning, count -> Binomial(count, f)      (a real knockdown also adds zeros)
+      f > 1: count + Poisson((f - 1) * expected count), with expected count = cell total x the gene's
+             control share, so zero cells can gain reads too.
+    Library sizes change only by the edited genes' net change. Returns dense int32 counts."""
+    out = np.asarray(baseline_counts.todense(), dtype=np.int64)
+    genes = np.flatnonzero(z_profile)
+    if genes.size == 0:
+        return out.astype(np.int32)
+    fold = np.clip(np.exp(beta * z_profile[genes] * ref["sigma_log1p_cp10k_floored"][genes]), 1 / max_fold, max_fold)
+    share = ref["raw_mean_count"] / ref["raw_mean_count"].sum()
+    totals = out.sum(axis=1, keepdims=True)
+    down, up = genes[fold < 1], genes[fold > 1]
+    if down.size:
+        out[:, down] = rng.binomial(out[:, down], fold[fold < 1][np.newaxis, :])
+    if up.size:
+        out[:, up] += rng.poisson((fold[fold > 1] - 1)[np.newaxis, :] * totals * share[up][np.newaxis, :])
+    return out.astype(np.int32)
+
+
 CANDIDATES = {
     "T0_null": (t0_null, {}),
     "T1_multiplicative": (t1_multiplicative, {"alpha": [0.5, 1.0, 1.5, 2.0]}),
