@@ -25,6 +25,8 @@ tg = pd.read_csv(cfg.PERT_COUNTS_CSV)[cfg.PERT_COL].tolist()
 ref = load_or_build("A")
 Z5, _ = load_saved_profiles("b5", tg); Z5 = align_z_matrix_to_context(Z5, gene_cols, genes)
 Z6, _ = load_saved_profiles("b6", tg); Z6 = align_z_matrix_to_context(Z6, gene_cols, genes)
+Z7, _ = load_saved_profiles("b7", tg); Z7 = align_z_matrix_to_context(Z7, gene_cols, genes)
+ZT4 = {"b6": Z6, "b7": Z7}
 meta_real = set(np.where(pd.read_json(cfg.PROJECT_ROOT / "models" / "b5_meta.json", typ="series")["is_real"])[0])
 pick = [i for i in rng.permutation(len(tg)) if i not in meta_real][:N_PERTS]
 
@@ -53,8 +55,9 @@ rows = []
 for variant in VARIANTS:
     for i in pick:
         idx = rng.choice(X.shape[0], cfg.CELLS_PER_PERT, replace=True)
-        if variant in ("b6", "t4null"):
-            syn = t4_sparse_thinning(X[idx], Z6[i] if variant == "b6" else np.zeros(len(genes)), ref, rng, beta=BETA_REAL).astype(np.float32)
+        if variant in ("b6", "b7", "t4null"):
+            syn = t4_sparse_thinning(X[idx], ZT4[variant][i] if variant in ZT4 else np.zeros(len(genes)), ref, rng,
+                                     beta=BETA_REAL).astype(np.float32)
         elif variant == "raw":                          # untouched resampled control cells (checks the test itself)
             syn = X[idx].toarray()
         else:
@@ -65,10 +68,10 @@ for variant in VARIANTS:
         sig = adj < 0.05
         tpos = np.where(genes[keep] == tg[i])[0]
         sig[tpos] = False
-        zz = (Z6 if variant == "b6" else Z5)[i][keep]
-        if variant == "b6":
+        zz = ZT4.get(variant, Z5)[i][keep]
+        if variant in ZT4:
             chosen = zz != 0
-            print(f"   b6 {tg[i]}: shifted {chosen.sum()} tested genes; called {sig.sum()}, of which {(sig & chosen).sum()} are shifted genes; "
+            print(f"   {variant} {tg[i]}: shifted {chosen.sum()} tested genes; called {sig.sum()}, of which {(sig & chosen).sum()} are shifted genes; "
                   f"called sign matches predicted sign: {np.mean(np.sign(lfc[sig & chosen]) == np.sign(zz[sig & chosen])):.2f}", flush=True)
         rows.append(dict(variant=variant, gene=tg[i], n_sig=int(sig.sum()),
                          n_up=int((sig & (lfc > 0)).sum()),

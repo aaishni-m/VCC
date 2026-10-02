@@ -55,6 +55,7 @@ Usage:
     python models/generate_b2_submission.py --model b4   # B4: profiles from gene_transfer_b4.py
     python models/generate_b2_submission.py --model b5   # B5: profiles from gene_transfer_b5.py
     python models/generate_b2_submission.py --model b6   # B6: top-K of B5, sparse T4 transform (gene_transfer_b6.py)
+    python models/generate_b2_submission.py --model b7   # B7: magnitude-preserving external direction (gene_transfer_b7.py)
 """
 import argparse
 import gc
@@ -265,14 +266,14 @@ def main(model="b2"):
     combined_obs = build_combined_obs(target_genes)
     assert combined_obs.shape[0] == n_obs_total
 
-    if model in ("b4", "b5", "b6"):
+    if model in ("b4", "b5", "b6", "b7"):
         z_matrix_vp, gene_betas = load_saved_profiles(model, target_genes)
     else:
         z_matrix_vp, real_mask = predict_all_target_z_profiles(target_genes, targets, gene_cols, R)
         gene_betas = np.where(real_mask, BETA_REAL, BETA_MEAN)
     z_matrix_full = align_z_matrix_to_context(z_matrix_vp, gene_cols, context_genes)  # (300, 18533)
 
-    transform = t4_sparse_thinning if model == "b6" else t2_log1p_additive  # b6: see gene_transfer_b6.py
+    transform = t4_sparse_thinning if model in ("b6", "b7") else t2_log1p_additive  # see gene_transfer_b6.py
     out_path = cfg.OUTPUTS / f"{model}_submission.h5ad"
     print(f"[B2-gen] initializing combined output file at {out_path} "
           f"(shape=({n_obs_total}, {cfg.N_GENES})) ...")
@@ -338,5 +339,5 @@ def main(model="b2"):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", choices=["b2", "b4", "b5", "b6"], default="b2")
+    parser.add_argument("--model", choices=["b2", "b4", "b5", "b6", "b7"], default="b2")
     main(parser.parse_args().model)
