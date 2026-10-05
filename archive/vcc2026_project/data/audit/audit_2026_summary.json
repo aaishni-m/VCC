@@ -1,0 +1,98 @@
+{
+  "A": {
+    "shape": [
+      18400,
+      18533
+    ],
+    "nnz": 109910478,
+    "density": 0.3223113119019188,
+    "X_dtype": "float32",
+    "X_min": 0.0,
+    "X_max": 977.0,
+    "obs_columns": [
+      "target_gene",
+      "context",
+      "ntc_id"
+    ],
+    "var_columns": [],
+    "counts_per_cell_mean": 21133.53515625,
+    "counts_per_cell_median": 20109.0,
+    "counts_per_cell_min": 3275.0,
+    "counts_per_cell_max": 52420.0,
+    "genes_per_cell_mean": 5973.395543478261,
+    "genes_per_cell_median": 6147.0,
+    "n_genes_never_detected": 2398,
+    "var_names_first5": [
+      "TSPAN6",
+      "TNMD",
+      "DPM1",
+      "SCYL3",
+      "C1orf112"
+    ],
+    "var_names_match_gene_names_csv": null
+  },
+  "B": {
+    "shape": [
+      18400,
+      18533
+    ],
+    "nnz": 101546777,
+    "density": 0.29778484735806166,
+    "X_dtype": "float32",
+    "X_min": 0.0,
+    "X_max": 1753.0,
+    "obs_columns": [
+      "target_gene",
+      "context",
+      "ntc_id"
+    ],
+    "var_columns": [],
+    "counts_per_cell_mean": 19989.94140625,
+    "counts_per_cell_median": 19946.0,
+    "counts_per_cell_min": 710.0,
+    "counts_per_cell_max": 42666.0,
+    "genes_per_cell_mean": 5518.846576086957,
+    "genes_per_cell_median": 5756.0,
+    "n_genes_never_detected": 2853,
+    "var_names_first5": [
+      "TSPAN6",
+      "TNMD",
+      "DPM1",
+      "SCYL3",
+      "C1orf112"
+    ],
+    "var_names_match_gene_names_csv": null
+  },
+  "C": {
+    "shape": [
+      18400,
+      18533
+    ],
+    "nnz": 108213983,
+    "density": 0.3173363582939011,
+    "X_dtype": "float32",
+    "X_min": 0.0,
+    "X_max": 2462.0,
+    "obs_columns": [
+      "target_gene",
+      "context",
+      "ntc_id"
+    ],
+    "var_columns": [],
+    "counts_per_cell_mean": 21156.537109375,
+    "counts_per_cell_median": 20034.0,
+    "counts_per_cell_min": 3447.0,
+    "counts_per_cell_max": 50965.0,
+    "genes_per_cell_mean": 5881.19472826087,
+    "genes_per_cell_median": 6006.0,
+    "n_genes_never_detected": 2317,
+    "var_names_first5": [
+      "TSPAN6",
+      "TNMD",
+      "DPM1",
+      "SCYL3",
+      "C1orf112"
+    ],
+    "var_names_match_gene_names_csv": null
+  }
+}

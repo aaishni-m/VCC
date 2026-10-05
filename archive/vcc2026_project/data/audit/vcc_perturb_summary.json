@@ -1,0 +1,121 @@
+{
+  "shape": [
+    750,
+    18081
+  ],
+  "n_unique_targets": 150,
+  "replicates_per_target": {
+    "5": 150
+  },
+  "value_semantics": {
+    "global_min": -190.26,
+    "global_max": 219.98,
+    "global_mean": 0.2869399560096153,
+    "global_std": 0.7833530405933288,
+    "pct_exact_zero": 0.09182249262536873,
+    "frac_abs_over_threshold": {
+      "5": 0.001683259587020649,
+      "10": 0.00039100294985250735,
+      "20": 9.579646017699115e-05,
+      "50": 1.2536873156342183e-05,
+      "100": 2.5811209439528024e-06
+    },
+    "top_artifact_genes_gene_absmax_n_over5": [
+      [
+        "SCD",
+        219.98,
+        110
+      ],
+      [
+        "CD24",
+        190.26,
+        134
+      ],
+      [
+        "HMGCS1",
+        178.0,
+        87
+      ],
+      [
+        "DNAJC15",
+        153.96721221890155,
+        4
+      ],
+      [
+        "FADS2",
+        148.72,
+        84
+      ],
+      [
+        "ACTB",
+        143.78,
+        135
+      ],
+      [
+        "ZNF560",
+        142.0169905076384,
+        1
+      ],
+      [
+        "ZIC1",
+        140.54377741971658,
+        1
+      ],
+      [
+        "TMSB4X",
+        140.5,
+        120
+      ],
+      [
+        "MAEL",
+        138.39300732353254,
+        3
+      ]
+    ],
+    "interpretation": "Extreme |value| outliers (up to ~220) concentrate on a small, perturbation-independent set of genes (ACTB, TMSB4X, SCD, CD24, HMGCS1 -- high/stable-expression housekeeping-type genes) that recur as outliers across 80-135 of the 750 unrelated perturbation rows. Real log2FC or raw expression deltas would be bounded by actual biology and would NOT blow up specifically on housekeeping genes regardless of which gene was knocked down. This is the textbook signature of a per-gene z-score computed by dividing by a very small reference standard deviation -- i.e. these values are z-scores (perturbation_zscores.parquet in the source dataset), not raw deltas or logFC. Treated as such throughout. Values also appear rounded to 2 decimals, which creates the 9.2% exact-zero rate and loses precision on small true effects."
+  },
+  "replicate_consistency": {
+    "n_genes_sampled": 15,
+    "mean_pairwise_replicate_corr": 0.23243550428953672,
+    "min_pairwise_replicate_corr": 0.06393378487688947,
+    "interpretation": "Low (0.1-0.4) mean pairwise correlation among a gene's 5 replicate rows, consistent with the HF dataset card's own caveat that these are random subsamples of one cell pool, not independent biological replicates -- noisy. Averaging (not concatenating) the 5 rows per target gene before use reduces this noise; kept as an explicit caveat rather than treated as high-confidence ground truth."
+  },
+  "gene_axis_overlap": {
+    "vcc_perturb_response_genes": 18080,
+    "vcc_2026_gene_axis": 18533,
+    "overlap": 18077,
+    "pct_of_2026_axis_covered": 97.53952409215994,
+    "in_vcc_perturb_not_in_2026_axis_sample": [
+      "HSPA14-1",
+      "TBCE-1",
+      "TMSB15B-1"
+    ]
+  },
+  "target_panel_overlap": {
+    "vcc_perturb_targets": 150,
+    "vcc_2026_targets": 300,
+    "overlap_n": 13,
+    "overlap_genes": [
+      "AKT2",
+      "HSBP1",
+      "MED13",
+      "MTA1",
+      "RNF2",
+      "SHPRH",
+      "SIN3B",
+      "SMARCA5",
+      "STAT6",
+      "TARBP2",
+      "TRAPPC6A",
+      "TWF2",
+      "ZNF714"
+    ],
+    "pct_of_2026_targets_directly_measured": 4.333333333333334,
+    "interpretation": "Only 13/300 (4.3%) of 2026's target genes were themselves knocked down in vcc-perturb. A direct perturbation-lookup baseline (B1) can therefore cover at most this many of the 300 genes per context -- confirms gene-feature transfer (not lookup) has to carry the other ~96%."
+  },
+  "targets_2026_usable_as_knn_query_genes": {
+    "n": 300,
+    "of": 300,
+    "note": "All 300 of 2026's target genes appear as *response*-axis columns in vcc-perturb (even the ~96% never themselves knocked down there), so every one has a 150-dim 'how do known perturbations affect this gene' embedding usable for KNN transfer -- see models/gene_transfer_b2.py."
+  }
+}
