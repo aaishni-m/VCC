@@ -26,7 +26,7 @@ from pathlib import Path
 pins = [f"{p}=={version(p)}" for p in ("numpy", "scipy", "pandas")]
 subprocess.run([sys.executable, "-m", "pip", "install", "-q", "anndata", "requests", "fsspec", "aiohttp", "uv", *pins],
                check=True)
-subprocess.run(["uv", "tool", "install", "--force", "cell-eval2"], check=True)   # isolated env for the scorer
+subprocess.run(["uv", "tool", "install", "--force", "cell-eval2", "--with", "pdex"], check=True)  # isolated scorer env + CPU DE engine
 CE = str(Path.home() / ".local" / "bin" / "cell-eval2")
 
 import anndata as ad  # noqa: E402
