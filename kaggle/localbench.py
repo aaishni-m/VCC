@@ -126,6 +126,7 @@ X_real = read_rows(real_rows)
 real = ad.AnnData(X=X_real, obs=pd.DataFrame({"target_gene": labels[real_rows]}, index=[f"c{i}" for i in real_rows]),
                   var=pd.DataFrame(index=G))
 real.write_h5ad(TMP / "real.h5ad")
+X_ctrl_held = X_real[np.isin(real_rows, ntc_held)]
 log(f"real reference: {real.shape} ({len(pert_rows)} perturbed + {len(ntc_held)} held-out controls); "
     f"released controls: {X_rel.shape[0]}")
 
@@ -237,6 +238,10 @@ def write_pred(name, profiles, kind):
         c = emit_t2(p) if kind == "t2" else emit_fold(z_to_fold(p) if kind == "zfold" else 2.0 ** p)
         cells.append(sp.csr_matrix(c.astype(np.float32)))
         labs += [t] * N_PRED
+    # cell-eval2 requires the same perturbation set on both sides; the vcc2026 preset scores against the REAL
+    # controls (control_source: real), so the held-out control cells are appended unchanged
+    cells.append(X_ctrl_held)
+    labs += ["non-targeting"] * X_ctrl_held.shape[0]
     X = sp.vstack(cells).tocsr()
     pred = ad.AnnData(X=X, obs=pd.DataFrame({"target_gene": labs}, index=[f"p{i}" for i in range(len(labs))]),
                       var=pd.DataFrame(index=G))
@@ -285,6 +290,8 @@ log("baseline arm built")
 ce("prep-real-bundle", "--real", str(TMP / "real.h5ad"), "--baseline", str(TMP / "baseline_pred.h5ad"),
    "-o", str(TMP / "bundle"), "--anchor-splits", "2", "--force", *CFG)
 log("real bundle (baseline + replicate anchors) built")
+shutil.copytree(TMP / "bundle", OUT / "bundle", dirs_exist_ok=True)       # reusable: ~47 min to rebuild
+shutil.copytree(TMP / "baseline", OUT / "baseline", dirs_exist_ok=True)
 
 rows = []
 for name, (prof, kind) in VARIANTS.items():
