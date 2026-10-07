@@ -104,6 +104,6 @@ log(f"Zhu: {len(rows)} rows; covers {len(t_have)}/300 targets")
 cov = {"K562": len(k_have), "T": len(t_have), "both": len(set(k_have) & set(t_have)),
        "neither": [t for t in targets if t not in first and t not in per.index],
        "genes_measured": {"K562": int(sum(g in gpos for g in k_genes)), "T": int(sum(g in gpos for g in z_gene))}}
-np.savez_compressed(OUT / "lfc_profiles.npz", targets=np.array(targets), genes=G, K562=K, T=T)
+np.savez_compressed(OUT / "lfc_profiles.npz", targets=np.array(targets, dtype=str), genes=G.astype(str), K562=K, T=T)
 (OUT / "lfc_profiles.json").write_text(json.dumps(cov, indent=2))
 log("saved lfc_profiles.npz", json.dumps(cov))

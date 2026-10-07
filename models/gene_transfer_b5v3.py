@@ -45,7 +45,7 @@ def build_profiles(K, T, c, self_cols):
 
 
 def main(c, npz_path):
-    npz = np.load(npz_path)
+    npz = np.load(npz_path, allow_pickle=True)   # our own vcc-lfc output; v1 of it stored names as objects
     target_genes = pd.read_csv(cfg.PERT_COUNTS_CSV)[cfg.PERT_COL].str.strip().tolist()
     assert list(npz["targets"]) == target_genes, "lfc_profiles.npz target order differs from pert_counts.csv"
     genes = npz["genes"].astype(str)
