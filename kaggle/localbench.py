@@ -256,9 +256,27 @@ dir_unit = unit(K_z) + unit(T_z)
 VARIANTS = {}
 # B5-like: dense, shared mean + unit-sum directions, T2. Measured on B5's real profiles: direction top-200 level 0.94,
 # ||0.5 x mean|| / median ||direction|| = 0.576 -- reproduced here with the K562 screen-wide mean as the shared part
-b5_dir = dir_unit / topk_level(dir_unit) * 0.94
-b5_mean = m_shared / (np.linalg.norm(m_shared) + 1e-12) * np.median(np.linalg.norm(b5_dir, axis=1)) * 0.576
-VARIANTS["B5like_T2_dense"] = (b5_dir + b5_mean, "t2")
+def b5_like(direction):
+    d = direction / topk_level(direction) * 0.94
+    m = m_shared / (np.linalg.norm(m_shared) + 1e-12) * np.median(np.linalg.norm(d, axis=1)) * 0.576
+    return d + m
+
+
+def b5v2_direction(zhu_soft, agree_p):
+    """models/gene_transfer_b5v2.py's combined direction: Zhu z soft-thresholded, then sign-agreement weighting."""
+    tz = np.sign(T_z) * np.maximum(np.abs(T_z) - zhu_soft, 0) if zhu_soft > 0 else T_z
+    uk, ut = unit(K_z), unit(tz)
+    d = uk + ut
+    if agree_p > 0:
+        a = np.abs(uk) + np.abs(ut)
+        d = d * np.divide(np.abs(d), a, out=np.zeros_like(d), where=a > 0) ** agree_p
+    return d
+
+
+VARIANTS["B5like_T2_dense"] = (b5_like(dir_unit), "t2")
+VARIANTS["B5v2like_T2_dense"] = (b5_like(b5v2_direction(1.0, 1.0)), "t2")
+VARIANTS["B5like_zhusoft1"] = (b5_like(b5v2_direction(1.0, 0.0)), "t2")
+VARIANTS["B5like_agree1"] = (b5_like(b5v2_direction(0.0, 1.0)), "t2")
 # B7-like: magnitude-preserving (sources put on a common scale), no mean, top-400, z-fold emitter
 kz_s, tz_s = np.median(np.linalg.norm(K_z, axis=1)), np.median(np.linalg.norm(T_z, axis=1))
 mag = (K_z / kz_s + T_z / tz_s) / 2
@@ -284,17 +302,28 @@ def ce(*args):
     return r
 
 
-ce("baseline", "-ar", str(TMP / "real.h5ad"), "-o", str(TMP / "baseline"), "--save-pred", str(TMP / "baseline_pred.h5ad"),
-   *CFG)
-log("baseline arm built")
-ce("prep-real-bundle", "--real", str(TMP / "real.h5ad"), "--baseline", str(TMP / "baseline_pred.h5ad"),
-   "-o", str(TMP / "bundle"), "--anchor-splits", "2", "--force", *CFG)
-log("real bundle (baseline + replicate anchors) built")
+# Reuse a previous run's bundle (attached as a kernel source) when it was built on this exact panel -- the panel,
+# control split and real.h5ad are all fixed by the seed, so the bundle is identical; saves ~47 min.
+prev = next((m.parent for m in Path("/kaggle/input").rglob("localbench_meta.json")
+             if (m.parent / "bundle" / "anchor_meta.json").exists()), None)
+if prev is not None and json.loads((prev / "localbench_meta.json").read_text())["panel"] == panel:
+    shutil.copytree(prev / "bundle", TMP / "bundle", dirs_exist_ok=True)
+    log(f"reusing real bundle from {prev} (same panel)")
+else:
+    ce("baseline", "-ar", str(TMP / "real.h5ad"), "-o", str(TMP / "baseline"), "--save-pred",
+       str(TMP / "baseline_pred.h5ad"), *CFG)
+    log("baseline arm built")
+    ce("prep-real-bundle", "--real", str(TMP / "real.h5ad"), "--baseline", str(TMP / "baseline_pred.h5ad"),
+       "-o", str(TMP / "bundle"), "--anchor-splits", "2", "--force", *CFG)
+    log("real bundle (baseline + replicate anchors) built")
+    shutil.copytree(TMP / "baseline", OUT / "baseline", dirs_exist_ok=True)
 shutil.copytree(TMP / "bundle", OUT / "bundle", dirs_exist_ok=True)       # reusable: ~47 min to rebuild
-shutil.copytree(TMP / "baseline", OUT / "baseline", dirs_exist_ok=True)
 
+# which variants this run scores (each ~12 min); B5like first so it reproduces round 1 exactly (same RNG state)
+RUN = ["B5like_T2_dense", "B5v2like_T2_dense", "B5like_zhusoft1", "B5like_agree1"]
 rows = []
-for name, (prof, kind) in VARIANTS.items():
+for name in RUN:
+    prof, kind = VARIANTS[name]
     path = write_pred(name, prof, kind)
     out = TMP / f"run_{name}"
     ce("run", "-ap", str(path), "-ar", str(TMP / "real.h5ad"), "-o", str(out), *CFG)
@@ -309,5 +338,5 @@ for name, (prof, kind) in VARIANTS.items():
     print(df.to_string(index=False), flush=True)
     pd.concat(rows).to_csv(OUT / "localbench_scores.csv", index=False)
     path.unlink()
-(OUT / "localbench_meta.json").write_text(json.dumps({"panel": panel, "n_pred": N_PRED, "variants": list(VARIANTS)}))
+(OUT / "localbench_meta.json").write_text(json.dumps({"panel": panel, "n_pred": N_PRED, "variants": RUN}))
 log("done")
