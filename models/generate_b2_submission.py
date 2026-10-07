@@ -55,6 +55,7 @@ Usage:
     python models/generate_b2_submission.py --model b4   # B4: profiles from gene_transfer_b4.py
     python models/generate_b2_submission.py --model b5   # B5: profiles from gene_transfer_b5.py
     python models/generate_b2_submission.py --model b5v2 # B5 v2: Zhu-thresholded, agreement-weighted (gene_transfer_b5v2.py)
+    python models/generate_b2_submission.py --model b5v3 # B5 v3: dense log2 fold change, T5 fold transform (gene_transfer_b5v3.py)
     python models/generate_b2_submission.py --model b6   # B6: top-K of B5, sparse T4 transform (gene_transfer_b6.py)
     python models/generate_b2_submission.py --model b7   # B7: magnitude-preserving external direction (gene_transfer_b7.py)
 """
@@ -75,7 +76,7 @@ import json
 import config as cfg
 from models.gene_transfer_b2 import load_response_matrix
 from models.pseudobulk_reference import load_or_build
-from models.transform_candidates import t2_log1p_additive, t4_sparse_thinning
+from models.transform_candidates import t2_log1p_additive, t4_sparse_thinning, t5_log2_fold
 
 CHUNK_GENES = 15          # matches control_baseline.py's chunk size
 BETA_REAL = 1.5           # beta for the 13/300 genes with real vcc-perturb z-score profiles
@@ -267,14 +268,24 @@ def main(model="b2"):
     combined_obs = build_combined_obs(target_genes)
     assert combined_obs.shape[0] == n_obs_total
 
-    if model in ("b4", "b5", "b5v2", "b6", "b7"):
-        z_matrix_vp, gene_betas = load_saved_profiles(model, target_genes)
+    if model == "b5v3":
+        # log2 fold changes, already on the context gene axis (gene_transfer_b5v3.py); beta 1 = use them as saved
+        meta = json.loads((cfg.PROJECT_ROOT / "models" / "b5v3_meta.json").read_text())
+        assert meta["target_genes"] == [g.strip() for g in target_genes], "b5v3_meta.json target order differs"
+        assert list(meta["genes"]) == [str(g) for g in context_genes], "b5v3 gene axis differs from the contexts'"
+        z_matrix_full = np.load(cfg.PROJECT_ROOT / "models" / "b5v3_profiles.npy").astype(np.float64)
+        gene_betas = np.ones(len(target_genes))
+        print(f"[B5V3-gen] log2-fold profiles {z_matrix_full.shape}, c={meta['c']}, sources {meta['counts']}")
     else:
-        z_matrix_vp, real_mask = predict_all_target_z_profiles(target_genes, targets, gene_cols, R)
-        gene_betas = np.where(real_mask, BETA_REAL, BETA_MEAN)
-    z_matrix_full = align_z_matrix_to_context(z_matrix_vp, gene_cols, context_genes)  # (300, 18533)
+        if model in ("b4", "b5", "b5v2", "b6", "b7"):
+            z_matrix_vp, gene_betas = load_saved_profiles(model, target_genes)
+        else:
+            z_matrix_vp, real_mask = predict_all_target_z_profiles(target_genes, targets, gene_cols, R)
+            gene_betas = np.where(real_mask, BETA_REAL, BETA_MEAN)
+        z_matrix_full = align_z_matrix_to_context(z_matrix_vp, gene_cols, context_genes)  # (300, 18533)
 
-    transform = t4_sparse_thinning if model in ("b6", "b7") else t2_log1p_additive  # see gene_transfer_b6.py
+    transform = (t5_log2_fold if model == "b5v3" else
+                 t4_sparse_thinning if model in ("b6", "b7") else t2_log1p_additive)  # see gene_transfer_b6.py
     out_path = cfg.OUTPUTS / f"{model}_submission.h5ad"
     print(f"[B2-gen] initializing combined output file at {out_path} "
           f"(shape=({n_obs_total}, {cfg.N_GENES})) ...")
@@ -340,5 +351,5 @@ def main(model="b2"):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", choices=["b2", "b4", "b5", "b5v2", "b6", "b7"], default="b2")
+    parser.add_argument("--model", choices=["b2", "b4", "b5", "b5v2", "b5v3", "b6", "b7"], default="b2")
     main(parser.parse_args().model)

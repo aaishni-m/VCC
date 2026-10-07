@@ -92,3 +92,27 @@ def test_b5v2_agreement_and_zhu_threshold():
     # Zhu soft-threshold at 1: |z| <= 1 drops out, the rest shrink by 1 before unit-normalising
     U = v2({"D_K562": np.zeros((1, 4)), "D_T_mean": np.array([[0.5, -0.9, 3.0, -2.0]])}, "D_", 1, 0)
     np.testing.assert_allclose(U, [[0, 0, 2 / np.sqrt(5), -1 / np.sqrt(5)]])
+
+
+def test_b5v3_profiles_average_available_sources_and_zero_self():
+    from models.gene_transfer_b5v3 import build_profiles
+    nan = np.nan
+    K = np.array([[1.0, 2.0, 0.0], [nan, nan, nan], [nan, nan, nan], [4.0, 0.0, 2.0]])
+    T = np.array([[3.0, 0.0, 2.0], [1.0, -1.0, 0.5], [nan, nan, nan], [nan, nan, nan]])
+    prof, src = build_profiles(K, T, 2.0, np.array([2, -1, -1, 0]))
+    np.testing.assert_allclose(prof, [[4, 2, 0], [2, -2, 1], [0, 0, 0], [0, 0, 4]])
+    assert src == ["K562+T", "T", "none", "K562"]
+
+
+def test_t5_log2_fold_edits_only_changed_genes():
+    from models.transform_candidates import t5_log2_fold
+    rng = np.random.default_rng(0)
+    X = sp.csr_matrix(rng.poisson(5, (50, 6)).astype(np.float32))
+    ref = {"raw_mean_count": np.full(6, 5.0)}
+    lfc = np.array([0.0, -1.0, 2.0, 0.0, -10.0, 0.5])
+    out = t5_log2_fold(X, lfc, ref, rng)
+    base = X.toarray()
+    np.testing.assert_array_equal(out[:, [0, 3]], base[:, [0, 3]])       # fold 1: untouched
+    assert np.all(out[:, 1] <= base[:, 1]) and np.all(out[:, 2] >= base[:, 2])
+    assert out[:, 4].sum() < 0.1 * base[:, 4].sum()                       # clipped at 1/20
+    np.testing.assert_array_equal(t5_log2_fold(X, np.zeros(6), ref, rng), base)

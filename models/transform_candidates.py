@@ -162,6 +162,26 @@ def t4_sparse_thinning(baseline_counts, z_profile, ref, rng, beta=1.0, max_fold=
     return out.astype(np.int32)
 
 
+def t5_log2_fold(baseline_counts, log2_fold, ref, rng, beta=1.0, max_fold=20.0):
+    """B5 v3: T4's edit-only-changed-genes mechanics, driven directly by a log2 fold change instead of a z-score.
+
+    fold_g = 2 ** (beta * log2_fold_g), clipped to [1/max_fold, max_fold]; genes with fold exactly 1 keep the control
+    cell's counts. Same as kaggle/localbench.py's emit_fold, which is what the 'lfc' variants were scored with."""
+    out = np.asarray(baseline_counts.todense(), dtype=np.int64)
+    genes = np.flatnonzero(log2_fold)
+    if genes.size == 0:
+        return out.astype(np.int32)
+    fold = np.clip(2.0 ** (beta * log2_fold[genes]), 1 / max_fold, max_fold)
+    share = ref["raw_mean_count"] / ref["raw_mean_count"].sum()
+    totals = out.sum(axis=1, keepdims=True)
+    down, up = genes[fold < 1], genes[fold > 1]
+    if down.size:
+        out[:, down] = rng.binomial(out[:, down], fold[fold < 1][np.newaxis, :])
+    if up.size:
+        out[:, up] += rng.poisson((fold[fold > 1] - 1)[np.newaxis, :] * totals * share[up][np.newaxis, :])
+    return out.astype(np.int32)
+
+
 CANDIDATES = {
     "T0_null": (t0_null, {}),
     "T1_multiplicative": (t1_multiplicative, {"alpha": [0.5, 1.0, 1.5, 2.0]}),

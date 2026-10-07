@@ -13,7 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-MODEL = "__MODEL__"   # replaced by the workflow (b2 | b4 | b5 | b5v2 | b6 | b7)
+MODEL = "__MODEL__"   # replaced by the workflow (b2 | b4 | b5 | b5v2 | b5v3 | b6 | b7)
 PREP = "__PREP__"     # "dry-run" or "full"
 
 
@@ -44,8 +44,8 @@ env = dict(os.environ,
            VCC_OUTPUTS_DIR="/kaggle/temp/outputs")   # 14 GB .h5ad stays off the 20 GB working dir
 
 run([sys.executable, "-m", "pip", "install", "-q", "anndata", "uv"])
-for step in {"b4": ["b4"], "b5": ["b5"], "b5v2": ["b5v2"], "b6": ["b5", "b6"], "b7": ["b5", "b6", "b7"]}.get(MODEL, []):
-    run([sys.executable, f"models/gene_transfer_{step}.py"], cwd=code_dir, env=env)   # b5 finds external_profiles.npz under /kaggle/input
+for step in {"b4": ["b4"], "b5": ["b5"], "b5v2": ["b5v2"], "b5v3": ["b5v3"], "b6": ["b5", "b6"], "b7": ["b5", "b6", "b7"]}.get(MODEL, []):
+    run([sys.executable, f"models/gene_transfer_{step}.py"], cwd=code_dir, env=env)   # b5/b5v3 find their .npz under /kaggle/input
 run([sys.executable, "models/generate_b2_submission.py", "--model", MODEL], cwd=code_dir, env=env)
 
 VCC_CLI = "vcc-cli==0.2.2"   # stream_package.py mirrors this version's prep; bump both together
@@ -54,7 +54,7 @@ vcc = str(Path.home() / ".local" / "bin" / "vcc")
 src = f"/kaggle/temp/outputs/{MODEL}_submission.h5ad"
 genes, perts = str(controls / "gene_names.csv"), str(controls / "pert_counts.csv")
 out = f"/kaggle/working/{MODEL}_submission.vcc"
-if MODEL in ("b6", "b7"):
+if MODEL in ("b5v3", "b6", "b7"):
     # too dense for `vcc prep` on 30 GiB (see models/stream_package.py): package in a streaming way, after a
     # self-test that requires byte-level agreement with real `vcc prep` on a subset
     # run inside vcc-cli's own tool environment, so anndata/pandas/h5py are exactly the ones `vcc prep` uses
