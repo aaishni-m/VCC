@@ -289,6 +289,9 @@ lfc = (K_lfc + T_lfc) / 2
 for k in (400, 4000, None):
     for c in (0.5, 1.0):
         VARIANTS[f"lfc_c{c}_k{k or 'all'}"] = (c * sparsify(lfc, k), "lfc")
+# v3 round: dense log-fold-change above c=1 (round 1: pds rose 0.40 -> 0.60 from c=0.5 to 1 with no sign of saturating)
+for c in (1.5, 2.0, 3.0):
+    VARIANTS[f"lfc_c{c}_kall"] = (c * lfc, "lfc")
 
 # ---------------- official scoring ----------------
 CFG = ["--preset", "vcc2026", "--pert-col", "target_gene", "--set", "de.backend=pdex"]
@@ -320,7 +323,7 @@ else:
 shutil.copytree(TMP / "bundle", OUT / "bundle", dirs_exist_ok=True)       # reusable: ~47 min to rebuild
 
 # which variants this run scores (each ~12 min); B5like first so it reproduces round 1 exactly (same RNG state)
-RUN = ["B5like_T2_dense", "B5v2like_T2_dense", "B5like_zhusoft1", "B5like_agree1"]
+RUN = ["B5like_T2_dense", "lfc_c1.5_kall", "lfc_c2.0_kall", "lfc_c3.0_kall"]
 rows = []
 for name in RUN:
     prof, kind = VARIANTS[name]
