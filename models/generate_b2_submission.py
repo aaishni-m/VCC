@@ -54,6 +54,7 @@ Usage:
     python models/generate_b2_submission.py              # B2 (unchanged, reproducible)
     python models/generate_b2_submission.py --model b4   # B4: profiles from gene_transfer_b4.py
     python models/generate_b2_submission.py --model b5   # B5: profiles from gene_transfer_b5.py
+    python models/generate_b2_submission.py --model b5v2 # B5 v2: Zhu-thresholded, agreement-weighted (gene_transfer_b5v2.py)
     python models/generate_b2_submission.py --model b6   # B6: top-K of B5, sparse T4 transform (gene_transfer_b6.py)
     python models/generate_b2_submission.py --model b7   # B7: magnitude-preserving external direction (gene_transfer_b7.py)
 """
@@ -266,7 +267,7 @@ def main(model="b2"):
     combined_obs = build_combined_obs(target_genes)
     assert combined_obs.shape[0] == n_obs_total
 
-    if model in ("b4", "b5", "b6", "b7"):
+    if model in ("b4", "b5", "b5v2", "b6", "b7"):
         z_matrix_vp, gene_betas = load_saved_profiles(model, target_genes)
     else:
         z_matrix_vp, real_mask = predict_all_target_z_profiles(target_genes, targets, gene_cols, R)
@@ -339,5 +340,5 @@ def main(model="b2"):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", choices=["b2", "b4", "b5", "b6", "b7"], default="b2")
+    parser.add_argument("--model", choices=["b2", "b4", "b5", "b5v2", "b6", "b7"], default="b2")
     main(parser.parse_args().model)

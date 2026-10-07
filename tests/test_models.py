@@ -66,3 +66,29 @@ def test_combined_obs_shape_and_unique_names():
     assert obs.shape[0] == len(cfg.VAL_CONTEXTS) * cfg.N_TARGET_GENES * cfg.CELLS_PER_PERT
     assert obs.index.is_unique
     assert (obs[cfg.PERT_COL].value_counts() == cfg.CELLS_PER_PERT * len(cfg.VAL_CONTEXTS)).all()
+
+
+def _fake_external(n=6, g=30, seed=1):
+    rng = np.random.default_rng(seed)
+    K, T = rng.normal(0, 2, (n, g)), rng.normal(0, 2, (n, g))
+    K[0] = np.nan                       # a target K562 doesn't cover
+    return {"D_K562": K, "D_T_mean": T}, np.array([3, -1, 5, 7, -1, 2])
+
+
+def test_b5v2_with_changes_off_matches_b5():
+    from models.gene_transfer_b5 import combined_direction as v1
+    from models.gene_transfer_b5v2 import combined_direction as v2
+    npz, self_cols = _fake_external()
+    np.testing.assert_array_equal(v2(npz, "D_", 0, 0, self_cols), v1(npz, "D_", self_cols))
+
+
+def test_b5v2_agreement_and_zhu_threshold():
+    from models.gene_transfer_b5 import combined_direction as v1
+    from models.gene_transfer_b5v2 import combined_direction as v2
+    npz, self_cols = _fake_external()
+    D1, D2 = v1(npz, "D_", self_cols), v2(npz, "D_", 0, 1, self_cols)
+    assert np.all(np.abs(D2) <= np.abs(D1) + 1e-12)              # agreement only shrinks
+    np.testing.assert_allclose(D2[0], D1[0])                       # single-source target untouched
+    # Zhu soft-threshold at 1: |z| <= 1 drops out, the rest shrink by 1 before unit-normalising
+    U = v2({"D_K562": np.zeros((1, 4)), "D_T_mean": np.array([[0.5, -0.9, 3.0, -2.0]])}, "D_", 1, 0)
+    np.testing.assert_allclose(U, [[0, 0, 2 / np.sqrt(5), -1 / np.sqrt(5)]])
