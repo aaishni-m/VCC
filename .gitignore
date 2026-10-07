@@ -20,3 +20,4 @@ __pycache__/
 # Secrets
 .env
 *.token
+token.txt
