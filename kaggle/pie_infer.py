@@ -50,33 +50,58 @@ run(["uv", "venv", str(VENV), "--python", "3.12", "-q"])
 PY = str(VENV / "bin" / "python")
 run(["uv", "pip", "install", "--python", PY, "-q", "arc-pie", "requests", "scanpy"])
 
-# Memory: PIE's evidence build allocates ~60 GB of numpy arrays at once (9 x 10,967 x 31,675 accumulators, two per-
-# dataset count cubes, a dir-local copy). Kaggle has ~31 GB RAM but a 1 TB disk, so the installed evidence.py gets
-# those allocations disk-backed (np.lib.format.open_memmap, zero-filled). Same dtypes, same arithmetic, same files out;
-# PIE's own leave-one-out self-check still runs on the result.
-import re
+# Memory: PIE's evidence build keeps (perturbation x gene) accumulators for all 10,967 training perturbations x 31,675
+# genes (~60 GB; Kaggle has ~31 GB). At inference only the queried perturbations' rows are ever read, so the installed
+# evidence.py is patched to accumulate rows only for the perturbations in $PIE_EVIDENCE_PERTS (+ the three rows PIE's
+# own self-check reads). The two normalising scales still sum over EVERY train row, so the evidence served for the
+# queried perturbations is the same as from the full build. Each edit is an exact-text replacement and fails loudly.
 ev = next((VENV / "lib").glob("python3.*/site-packages/pie/data/evidence.py"))
 src = ev.read_text()
-n0 = src.count("np.zeros(")
-src, n1 = re.subn(r"np\.zeros\(\s*\(n_p, n_g\), dtype=(np\.float64 if k in SUM_ARRAYS else np\.int64)\s*\)",
-                  r"_disk_zeros((n_p, n_g), \1)", src)
-src, n2 = re.subn(r"np\.zeros\(\(n_k, n_p, n_g\), dtype=np\.int64\)", "_disk_zeros((n_k, n_p, n_g), np.int64)", src)
-src, n3 = re.subn(r"np\.zeros\(\s*\(len\(local_perts\), g_local\), dtype=(np\.float64 if k in SUM_ARRAYS else np\.int64)\s*\)",
-                  r"_disk_zeros((len(local_perts), g_local), \1)", src)
-assert (n1, n2, n3) == (1, 1, 1), f"evidence.py patch did not apply: {(n1, n2, n3)}"
-src += """
-
-def _disk_zeros(shape, dtype):
-    \"\"\"Zero-filled array; disk-backed under $PIE_EVIDENCE_SCRATCH (added for low-RAM hosts).\"\"\"
-    import os, tempfile
-    d = os.environ.get("PIE_EVIDENCE_SCRATCH")
-    if not d:
-        return np.zeros(shape, dtype=dtype)
-    f = tempfile.NamedTemporaryFile(dir=d, suffix=".npy", delete=False).name
-    return np.lib.format.open_memmap(f, mode="w+", dtype=dtype, shape=shape)
-"""
+EDITS = [
+    ("""    # Pass 2: accumulate dir-local first, then one column remap per dir.
+""", """    # Pass 2: accumulate dir-local first, then one column remap per dir.
+    # [patched, kaggle/pie_infer.py] restrict accumulators to $PIE_EVIDENCE_PERTS; scale totals over all rows.
+    import os as _os, json as _json
+    _keep_path = _os.environ.get("PIE_EVIDENCE_PERTS")
+    if _keep_path:
+        _keep = set(_json.load(open(_keep_path)))
+        _first = bdirs[0]
+        _keep |= {_first.pert_names[j] for j in {0, len(_first.kept) // 2, len(_first.kept) - 1}}
+        perts = [p for p in perts if p in _keep]
+        pidx = {p: i for i, p in enumerate(perts)}
+        n_p = len(perts)
+        log.info("evidence restricted to %d perturbations", n_p)
+    _totals = {k: 0.0 for k in ("dp_sum", "dp_sumsq", "dp_cnt", "lfc_sum", "lfc_sumsq", "lfc_cnt")}
+"""),
+    ("""        local_perts = sorted(set(b.pert_names))
+        lp = {p: i for i, p in enumerate(local_perts)}
+        rows_local = np.array([lp[p] for p in b.pert_names], dtype=np.int64)
+""", """        local_perts = sorted(set(b.pert_names) & set(pidx))
+        lp = {p: i for i, p in enumerate(local_perts)}
+        rows_local = np.array([lp.get(p, -1) for p in b.pert_names], dtype=np.int64)
+"""),
+    ("""            for k in GLOBAL_ARRAYS:
+                np.add.at(loc[k], rows_local[s : s + cfg.chunk], own[k])
+""", """            for k in _totals:
+                _totals[k] += float(np.asarray(own[k], dtype=np.float64).sum())
+            _rl = rows_local[s : s + cfg.chunk]
+            _m = _rl >= 0
+            if _m.any():
+                for k in GLOBAL_ARRAYS:
+                    np.add.at(loc[k], _rl[_m], np.asarray(own[k])[_m])
+"""),
+    ("""    totals = {
+        k: float(acc[k].sum())
+        for k in ("dp_sum", "dp_sumsq", "dp_cnt", "lfc_sum", "lfc_sumsq", "lfc_cnt")
+    }
+""", """    totals = dict(_totals)   # [patched] over every train row, not only the kept perturbations
+"""),
+]
+for old, new in EDITS:
+    assert src.count(old) == 1, f"evidence.py patch target not found exactly once:\n{old}"
+    src = src.replace(old, new, 1)
 ev.write_text(src)
-log(f"patched {ev}: 3 allocations disk-backed (np.zeros calls {n0} -> {src.count('np.zeros(')})")
+log(f"patched {ev}: evidence restricted to queried perturbations (scale totals over all rows)")
 controls = next(Path("/kaggle/input").rglob("pert_counts.csv")).parent
 panel_meta = next(Path("/kaggle/input").rglob("localbench_meta.json"))
 inner = TMP / "pie_run.py"
@@ -91,7 +116,7 @@ def log(*a): print(f"[pie {time.time()-T0:6.0f}s]", *a, flush=True)
 TMP, OUT = Path("/kaggle/temp"), Path("/kaggle/working")
 CONTROLS, PANEL_META = Path(sys.argv[1]), Path(sys.argv[2])
 for k, v in {"PIE_DATA_ROOT": TMP / "pie_data", "PIE_RUNS_ROOT": TMP / "pie_runs", "PIE_CACHE_DIR": TMP / "pie_cache",
-             "PIE_EVIDENCE_SCRATCH": TMP / "pie_scratch", "WANDB_MODE": "disabled"}.items():
+             "WANDB_MODE": "disabled"}.items():
     os.environ[k] = str(v); Path(v).mkdir(parents=True, exist_ok=True)
 
 from huggingface_hub import snapshot_download, hf_hub_download, hf_hub_url
@@ -192,6 +217,7 @@ query["replogle.rpe1"] = panel
 qp = TMP / "pie_query.json"; json.dump(query, open(qp, "w")); json.dump(query, open(OUT / "pie_query.json", "w"))
 from pie.assets import resolve_asset
 dirs = [resolve_asset(rep, kind="preprocessed"), vdir]
+ep = TMP / "evidence_perts.json"; json.dump(wanted, open(ep, "w")); os.environ["PIE_EVIDENCE_PERTS"] = str(ep)
 log("predicting", {k: len(v) for k, v in query.items()})
 import torch
 device = "cuda" if torch.cuda.is_available() else "cpu"
