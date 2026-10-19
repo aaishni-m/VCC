@@ -39,8 +39,9 @@ def run(cmd, **kw):
 
 
 log(subprocess.run(["df", "-h", "/kaggle/temp", "/kaggle/working"], capture_output=True, text=True).stdout)
-log(subprocess.run(["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv"], capture_output=True,
-                   text=True).stdout)
+log(subprocess.run(["free", "-g"], capture_output=True, text=True).stdout, f"cpus={os.cpu_count()}")
+# PIE's evidence tables need far more RAM than Kaggle's GPU box (~29 GB; killed there building Orion's), so this runs
+# on the high-memory TPU VM and predicts on CPU when no GPU is present.
 
 # ---- PIE needs Python 3.12: its own venv ----
 run([sys.executable, "-m", "pip", "install", "-q", "uv"])
@@ -165,7 +166,11 @@ qp = TMP / "pie_query.json"; json.dump(query, open(qp, "w")); json.dump(query, o
 from pie.assets import resolve_asset
 dirs = [resolve_asset(rep, kind="preprocessed"), vdir]
 log("predicting", {k: len(v) for k, v in query.items()})
-preds = predict_loaded(loaded, RowSource("query", qp), dirs, "cuda", 8)
+import torch
+device = "cuda" if torch.cuda.is_available() else "cpu"
+torch.set_num_threads(os.cpu_count() or 8)
+log("device", device, "threads", torch.get_num_threads())
+preds = predict_loaded(loaded, RowSource("query", qp), dirs, device, 8)
 out = write_predictions_parquet(preds, OUT / "pie_predictions.parquet")
 log("wrote", out, [(b.dataset, len(b.contexts), len(b.genes)) for b in preds.blocks])
 ''')
