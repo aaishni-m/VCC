@@ -116,3 +116,14 @@ def test_t5_log2_fold_edits_only_changed_genes():
     assert np.all(out[:, 1] <= base[:, 1]) and np.all(out[:, 2] >= base[:, 2])
     assert out[:, 4].sum() < 0.1 * base[:, 4].sum()                       # clipped at 1/20
     np.testing.assert_array_equal(t5_log2_fold(X, np.zeros(6), ref, rng), base)
+
+
+def test_pie_convert_modes_and_alignment():
+    from models.pie_convert import align, to_log2fold
+    p = np.array([0.9, 0.2, 0.6]); lfc = np.array([1.0, -2.0, -0.5]); d = np.array([0.0, 0.0, np.log(2)])
+    np.testing.assert_allclose(to_log2fold(p, lfc, d, "lfc_de"), [1.0, 0.0, -0.5])
+    np.testing.assert_allclose(to_log2fold(p, lfc, d, "lfc_soft"), [0.9, -0.4, -0.3])
+    m = np.log1p(np.array([10.0, 0.0, 10.0]))          # control mean log1p; gene 2 shifts by log 2
+    out = to_log2fold(p, lfc, d, "delta", m)
+    assert out[0] == 0 and out[1] == 0 and 1.0 < out[2] < 1.1   # 10 -> 21: a bit over a doubling, as log1p implies
+    np.testing.assert_allclose(align(np.array([1.0, 2.0]), ["a", "b"], ["b", "x", "a"]), [2.0, 0.0, 1.0])

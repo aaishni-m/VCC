@@ -293,6 +293,20 @@ for k in (400, 4000, None):
 for c in (1.5, 2.0, 3.0):
     VARIANTS[f"lfc_c{c}_kall"] = (c * lfc, "lfc")
 
+# PIE (Verma et al. 2026) zero-shot predictions for this panel, when a vcc-pie output is attached
+PIE_PQ = next(Path("/kaggle/input").rglob("pie_predictions.parquet"), None)
+if PIE_PQ is not None:
+    from models.pie_convert import MODES, load_pie, profiles
+    pie, pie_genes = load_pie(PIE_PQ, "replogle")
+    Xc = X_rel.astype(np.float64)
+    Xc = sp.diags(1e4 / np.maximum(np.asarray(Xc.sum(1)).ravel(), 1)) @ Xc
+    Xc.data = np.log1p(Xc.data)
+    m_rel = np.asarray(Xc.mean(0)).ravel()                 # control log1p(CP10K) mean, released controls
+    covered = sum(("rpe1", t) in pie for t in panel)
+    log(f"PIE predictions: {covered}/{len(panel)} panel knockdowns, {len(pie_genes)} genes")
+    for mode in MODES:
+        VARIANTS[f"PIE_{mode}"] = (profiles(pie, pie_genes, list(G), "rpe1", panel, mode, m_rel), "lfc")
+
 # ---------------- official scoring ----------------
 CFG = ["--preset", "vcc2026", "--pert-col", "target_gene", "--set", "de.backend=pdex"]
 
@@ -323,7 +337,7 @@ else:
 shutil.copytree(TMP / "bundle", OUT / "bundle", dirs_exist_ok=True)       # reusable: ~47 min to rebuild
 
 # which variants this run scores (each ~12 min); B5like first so it reproduces round 1 exactly (same RNG state)
-RUN = ["B5like_T2_dense", "lfc_c1.5_kall", "lfc_c2.0_kall", "lfc_c3.0_kall"]
+RUN = ["B5like_T2_dense", "lfc_c2.0_kall"] + [f"PIE_{m}" for m in ("lfc_de", "lfc_soft", "delta")]
 rows = []
 for name in RUN:
     prof, kind = VARIANTS[name]
