@@ -50,6 +50,33 @@ run(["uv", "venv", str(VENV), "--python", "3.12", "-q"])
 PY = str(VENV / "bin" / "python")
 run(["uv", "pip", "install", "--python", PY, "-q", "arc-pie", "requests", "scanpy"])
 
+# Memory: PIE's evidence build allocates ~60 GB of numpy arrays at once (9 x 10,967 x 31,675 accumulators, two per-
+# dataset count cubes, a dir-local copy). Kaggle has ~31 GB RAM but a 1 TB disk, so the installed evidence.py gets
+# those allocations disk-backed (np.lib.format.open_memmap, zero-filled). Same dtypes, same arithmetic, same files out;
+# PIE's own leave-one-out self-check still runs on the result.
+import re
+ev = next((VENV / "lib").glob("python3.*/site-packages/pie/data/evidence.py"))
+src = ev.read_text()
+n0 = src.count("np.zeros(")
+src, n1 = re.subn(r"np\.zeros\(\s*\(n_p, n_g\), dtype=(np\.float64 if k in SUM_ARRAYS else np\.int64)\s*\)",
+                  r"_disk_zeros((n_p, n_g), \1)", src)
+src, n2 = re.subn(r"np\.zeros\(\(n_k, n_p, n_g\), dtype=np\.int64\)", "_disk_zeros((n_k, n_p, n_g), np.int64)", src)
+src, n3 = re.subn(r"np\.zeros\(\s*\(len\(local_perts\), g_local\), dtype=(np\.float64 if k in SUM_ARRAYS else np\.int64)\s*\)",
+                  r"_disk_zeros((len(local_perts), g_local), \1)", src)
+assert (n1, n2, n3) == (1, 1, 1), f"evidence.py patch did not apply: {(n1, n2, n3)}"
+src += """
+
+def _disk_zeros(shape, dtype):
+    \"\"\"Zero-filled array; disk-backed under $PIE_EVIDENCE_SCRATCH (added for low-RAM hosts).\"\"\"
+    import os, tempfile
+    d = os.environ.get("PIE_EVIDENCE_SCRATCH")
+    if not d:
+        return np.zeros(shape, dtype=dtype)
+    f = tempfile.NamedTemporaryFile(dir=d, suffix=".npy", delete=False).name
+    return np.lib.format.open_memmap(f, mode="w+", dtype=dtype, shape=shape)
+"""
+ev.write_text(src)
+log(f"patched {ev}: 3 allocations disk-backed (np.zeros calls {n0} -> {src.count('np.zeros(')})")
 controls = next(Path("/kaggle/input").rglob("pert_counts.csv")).parent
 panel_meta = next(Path("/kaggle/input").rglob("localbench_meta.json"))
 inner = TMP / "pie_run.py"
@@ -64,7 +91,7 @@ def log(*a): print(f"[pie {time.time()-T0:6.0f}s]", *a, flush=True)
 TMP, OUT = Path("/kaggle/temp"), Path("/kaggle/working")
 CONTROLS, PANEL_META = Path(sys.argv[1]), Path(sys.argv[2])
 for k, v in {"PIE_DATA_ROOT": TMP / "pie_data", "PIE_RUNS_ROOT": TMP / "pie_runs", "PIE_CACHE_DIR": TMP / "pie_cache",
-             "WANDB_MODE": "disabled"}.items():
+             "PIE_EVIDENCE_SCRATCH": TMP / "pie_scratch", "WANDB_MODE": "disabled"}.items():
     os.environ[k] = str(v); Path(v).mkdir(parents=True, exist_ok=True)
 
 from huggingface_hub import snapshot_download, hf_hub_download, hf_hub_url
