@@ -7,6 +7,7 @@ Saved 2026-10-01 so we can return here at any point. Git tag: **`snapshot-b6`**.
 |---|---|---|
 | B5: 0.5 × H1 mean + 10 × external direction (Replogle K562 + Zhu T cells), T2 transform | submitted 2026-09-28, entry `uBfe774RImLP6LLmfOSx` | **Overall 0.1283** (pds 0.487, mse 0, nmae 0.084, fid −0.003, reach 0.212, jac −0.010) |
 | B5v3: 2 × dense log2 fold change (Replogle K562 genome-wide + Zhu T cells), fold transform | submitted 2026-10-08, entry `WYupOQbBnAYGoT6copZt` | **Overall 0.1066**, rank 605 (pds 0.544, mse 0, nmae −0.058, fid −0.005, reach 0.159, jac 0.001) — below B5 and the team's previous 0.1457 |
+| PIE: Verma et al. 2026 cross-dataset checkpoint, zero-shot; nearest-line context description; delta mode, CPM filter | submitted 2026-10-20, entry `IrpyLvVSqJVjnRq7djmN` | **Overall −0.0077**, rank 1088 (pds 0.186, mse 0, nmae −0.130, fid −0.128, reach 0.023, jac 0.004) — below B5 (0.1283) and B5v3 (0.1066), as the local bench predicted |
 | B6: B5's top-200 genes per perturbation, sparse T4 transform, streamed packaging | built and validated, **not submitted** | — |
 | B4: B2 + mean profile + self-knockdown | built, not submitted | — |
 
