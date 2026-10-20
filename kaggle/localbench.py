@@ -304,6 +304,9 @@ if PIE_PQ:
     Xc = sp.diags(1e4 / np.maximum(np.asarray(Xc.sum(1)).ravel(), 1)) @ Xc
     Xc.data = np.log1p(Xc.data)
     m_rel = np.asarray(Xc.mean(0)).ravel()                 # control log1p(CP10K) mean, released controls
+    from models.pie_convert import testable_genes
+    t_rel = testable_genes(X_rel)                          # PIE's CPM filter on the released controls
+    log(f"PIE CPM filter: {int(t_rel.sum())}/{len(G)} genes testable")
     for tag, dataset, context in (("desc", "replogle", "rpe1"), ("nn", "rpebench", "rpe1_nn")):
         try:
             pie, pie_genes = load_pie(PIE_PQ, dataset)
@@ -314,7 +317,8 @@ if PIE_PQ:
             continue
         log(f"PIE {tag}: {covered}/{len(panel)} panel knockdowns, {len(pie_genes)} genes")
         for mode in MODES:
-            VARIANTS[f"PIE_{tag}_{mode}"] = (profiles(pie, pie_genes, list(G), context, panel, mode, m_rel), "lfc")
+            VARIANTS[f"PIE_{tag}_{mode}"] = (profiles(pie, pie_genes, list(G), context, panel, mode, m_rel,
+                                                      testable_dst=t_rel), "lfc")
             PIE_RUNS.append(f"PIE_{tag}_{mode}")
 
 # ---------------- official scoring ----------------

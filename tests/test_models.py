@@ -127,3 +127,13 @@ def test_pie_convert_modes_and_alignment():
     out = to_log2fold(p, lfc, d, "delta", m)
     assert out[0] == 0 and out[1] == 0 and 1.0 < out[2] < 1.1   # 10 -> 21: a bit over a doubling, as log1p implies
     np.testing.assert_allclose(align(np.array([1.0, 2.0]), ["a", "b"], ["b", "x", "a"]), [2.0, 0.0, 1.0])
+
+
+def test_pie_testable_genes_and_masking():
+    from models.pie_convert import profiles, testable_genes
+    X = np.zeros((4, 3)); X[:, 0] = 1000; X[:, 1] = 1; X[:, 2] = 0          # gene 0 ~ 1e6 CPM, gene 1 ~ 1000, gene 2 none
+    X[:, 0] = 1e5 - 1                                                        # library ~1e5 -> gene 1 ~ 10 CPM
+    np.testing.assert_array_equal(testable_genes(X), [True, True, False])
+    pie = {("c", "p"): (np.array([0.9, 0.9, 0.9]), np.array([1.0, 1.0, 9.0]), np.zeros(3))}
+    out = profiles(pie, ["g0", "g1", "g2"], ["g0", "g1", "g2"], "c", ["p"], "lfc_de", testable_dst=[True, True, False])
+    np.testing.assert_allclose(out, [[1.0, 1.0, 0.0]])

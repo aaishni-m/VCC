@@ -14,6 +14,19 @@ import numpy as np
 import pandas as pd
 
 MODES = ("lfc_de", "lfc_soft", "delta")
+MIN_MEAN_CPM = 5.0   # PIE's CPM filter (paper A.1): a gene is tested, and supervised, only above this mean CPM
+
+
+def testable_genes(raw_counts):
+    """Genes passing PIE's CPM filter in these control cells (cells x genes raw counts). PIE never sees a label for a
+    gene below it, so its p_de / lfc there are not predictions (on the VCC contexts they run away: every unexpressed
+    gene 'DE' at |log2 FC| ~8-26); those genes are treated as untested -- not DE, no change."""
+    import scipy.sparse as sp
+
+    X = sp.csr_matrix(raw_counts, dtype=np.float64)
+    lib = np.asarray(X.sum(1)).ravel()
+    cpm = sp.diags(1e6 / np.maximum(lib, 1)) @ X
+    return np.asarray(cpm.mean(0)).ravel() > MIN_MEAN_CPM
 
 
 def load_pie(parquet_paths, dataset):
@@ -66,8 +79,9 @@ def align(vec, src_genes, dst_genes):
     return out
 
 
-def profiles(pie, src_genes, dst_genes, context, perts, mode, ctrl_log1p_mean_dst=None, thr=0.5):
-    """(len(perts), len(dst_genes)) log2 folds for one context; a pert PIE did not predict gets all zeros."""
+def profiles(pie, src_genes, dst_genes, context, perts, mode, ctrl_log1p_mean_dst=None, thr=0.5, testable_dst=None):
+    """(len(perts), len(dst_genes)) log2 folds for one context; a pert PIE did not predict gets all zeros, and genes
+    outside `testable_dst` (testable_genes on the context's controls) are left unchanged."""
     m_src = None if ctrl_log1p_mean_dst is None else align_back(ctrl_log1p_mean_dst, dst_genes, src_genes)
     rows = []
     for p in perts:
@@ -76,7 +90,10 @@ def profiles(pie, src_genes, dst_genes, context, perts, mode, ctrl_log1p_mean_ds
             continue
         p_de, lfc, delta = pie[(context, p)]
         rows.append(align(to_log2fold(p_de, lfc, delta, mode, m_src, thr), src_genes, dst_genes))
-    return np.stack(rows)
+    out = np.stack(rows)
+    if testable_dst is not None:
+        out[:, ~np.asarray(testable_dst, bool)] = 0.0
+    return out
 
 
 def align_back(vec_dst, dst_genes, src_genes):
