@@ -210,13 +210,65 @@ subprocess.run([str(Path(sys.executable).parent / "pie"), "prep", "dataset=arc_v
                 f"h5ad={h5dir}/*.h5ad", f"output_dir={vdir}", "controls_only=true",
                 f"genes={TMP / 'vcc26_genes.txt'}", "overwrite=true"], check=True)
 
-# ---- query: A/B/C x 300 targets, and the RPE1 panel in Replogle's own dir ----
-rep = [p for p in data.preprocessed_dirs if "replogle" in str(p)][0]
-query = {f"vcc26.{c}": targets for c in ("A", "B", "C")}
-query["replogle.rpe1"] = panel
-qp = TMP / "pie_query.json"; json.dump(query, open(qp, "w")); json.dump(query, open(OUT / "pie_query.json", "w"))
+# ---- Context Description substitute: A/B/C are anonymous, and without a Context Description PIE's predictions blow
+# up (run 6: ~7,200 DE genes per knockdown at |log2 FC| ~9, while RPE1 with its description was sane). Each anonymous
+# context borrows the description of the described training cell line whose control expression it most resembles:
+# Pearson correlation of control log1p(CP10K) means over the 2,000 genes that vary most across Tahoe's 50 lines
+# (tissue-specific signal); Jiang's cytokine-stimulated contexts are not candidates (their text includes a stimulus).
+# Mapped through PIE's own alias mechanism (context_text/aliases.yaml). Tested on RPE1 the same way: rpe1_nn borrows
+# its nearest OTHER line's description, rpe1_nodesc gets none.
 from pie.assets import resolve_asset
-dirs = [resolve_asset(rep, kind="preprocessed"), vdir]
+ctx_keys = set(json.load(open(src_root / "context_text" / "meta.json"))["keys"])
+cands = {}                                                   # name -> (genes, log1p control mean)
+for dp in data.preprocessed_dirs:
+    d = resolve_asset(dp, kind="preprocessed"); m = json.load(open(d / "meta.json"))
+    if m["dataset"] == "jiang":
+        continue
+    cm = np.load(d / "ctrl_means.npy")
+    for c, i in m["context_to_id"].items():
+        if c in ctx_keys:
+            cands[c] = (m["genes"], np.asarray(cm[i], np.float64))
+    if m["dataset"] == "tahoe":
+        tg = m["genes"]; tv = np.var(np.asarray(cm, np.float64), axis=0)
+        markers = [tg[i] for i in np.argsort(-tv)[:2000]]
+rep_dir = resolve_asset([p for p in data.preprocessed_dirs if "replogle" in str(p)][0], kind="preprocessed")
+rep_meta = json.load(open(rep_dir / "meta.json")); rep_cm = np.load(rep_dir / "ctrl_means.npy")
+queries = {c: (axis, np.asarray(np.load(vdir / "ctrl_means.npy")[i], np.float64))
+           for c, i in json.load(open(vdir / "meta.json"))["context_to_id"].items()}
+queries["rpe1"] = (rep_meta["genes"], np.asarray(rep_cm[rep_meta["context_to_id"]["rpe1"]], np.float64))
+def corr(q, c):
+    qg, qv = q; cg, cv = c
+    qi, ci = {g: i for i, g in enumerate(qg)}, {g: i for i, g in enumerate(cg)}
+    gs = [g for g in markers if g in qi and g in ci]
+    a = np.array([qv[qi[g]] for g in gs]); b = np.array([cv[ci[g]] for g in gs])
+    return float(np.corrcoef(a, b)[0, 1]), len(gs)
+nn = {}
+for qn, q in queries.items():
+    scores = sorted(((corr(q, cv), cn) for cn, cv in cands.items() if cn != qn), reverse=True)
+    nn[qn] = scores[0][1]
+    log(f"nearest described context for {qn}: " + ", ".join(f"{cn} r={r:.3f} (n={n})" for (r, n), cn in scores[:5]))
+json.dump(nn, open(OUT / "pie_context_nn.json", "w"), indent=1)
+aliases = {"A": nn["A"], "B": nn["B"], "C": nn["C"], "rpe1_nn": nn["rpe1"]}
+import yaml
+yaml.safe_dump(aliases, open(src_root / "context_text" / "aliases.yaml", "w"))
+log("context_text aliases:", aliases)
+
+# RPE1 again, as two new controls-only contexts with RPE1's control mean (one pseudo-cell each = the mean itself)
+bdir = TMP / "rpebench_h5ad"; bdir.mkdir(exist_ok=True)
+rv = queries["rpe1"][1].astype(np.float32)
+ad.AnnData(X=sp.csr_matrix(np.stack([rv, rv])),
+           obs=pd.DataFrame({"context": ["rpe1_nn", "rpe1_nodesc"], "target_gene": "non-targeting"}, index=["m1", "m2"]),
+           var=pd.DataFrame(index=rep_meta["genes"])).write_h5ad(bdir / "rpebench.h5ad")
+(TMP / "rep_genes.txt").write_text(chr(10).join(rep_meta["genes"]) + chr(10))
+rbdir = TMP / "pie_data" / "rpebench"
+subprocess.run([str(Path(sys.executable).parent / "pie"), "prep", "dataset=arc_vcc_25", "name=rpebench",
+                f"h5ad={bdir}/*.h5ad", f"output_dir={rbdir}", "controls_only=true",
+                f"genes={TMP / 'rep_genes.txt'}", "overwrite=true"], check=True)
+
+query = {"rpebench.rpe1_nn": panel, "rpebench.rpe1_nodesc": panel}
+query.update({f"vcc26.{c}": targets for c in ("A", "B", "C")})
+json.dump(query, open(OUT / "pie_query.json", "w"))
+dirs = [rbdir, vdir]
 ep = TMP / "evidence_perts.json"; json.dump(wanted, open(ep, "w")); os.environ["PIE_EVIDENCE_PERTS"] = str(ep)
 log("predicting", {k: len(v) for k, v in query.items()})
 import torch
@@ -229,7 +281,7 @@ if device == "cpu" or not torch.cuda.is_bf16_supported():
         update={"precision": "32-true"})})
 log("device", device, "threads", torch.get_num_threads(), "precision", loaded.config.trainer.precision)
 # one context at a time, each saved as it finishes (evidence is built once, then read from PIE_CACHE_DIR)
-for key in ["replogle.rpe1", "vcc26.A", "vcc26.B", "vcc26.C"]:
+for key in ["rpebench.rpe1_nodesc", "rpebench.rpe1_nn", "vcc26.A", "vcc26.B", "vcc26.C"]:
     t = time.time()
     qk = TMP / f"pie_query_{key}.json"; json.dump({key: query[key]}, open(qk, "w"))
     preds = predict_loaded(loaded, RowSource("query", qk), dirs, device, 8)
