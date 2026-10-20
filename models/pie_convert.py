@@ -16,17 +16,28 @@ import pandas as pd
 MODES = ("lfc_de", "lfc_soft", "delta")
 
 
-def load_pie(parquet_path, dataset):
-    """{(context, perturbation): (p_de, lfc, delta)} and that dataset's gene axis."""
+def load_pie(parquet_paths, dataset):
+    """{(context, perturbation): (p_de, lfc, delta)} and that dataset's gene axis, over one or more `pie infer`
+    parquet files (pie_infer.py writes one per context)."""
     import pyarrow.parquet as pq
 
-    tbl = pq.read_table(parquet_path)
-    genes = json.loads(tbl.schema.metadata[b"pie"])["genes"][dataset]
-    df = tbl.to_pandas()
-    df = df[df["dataset"] == dataset]
-    out = {(r.context, r.perturbation): (np.asarray(r.p_de, np.float64), np.asarray(r.lfc_pred, np.float64),
-                                         np.asarray(r.delta_p_pred, np.float64)) for r in df.itertuples()}
-    return out, list(genes)
+    paths = [parquet_paths] if isinstance(parquet_paths, (str, bytes)) or hasattr(parquet_paths, "suffix")         else list(parquet_paths)
+    out, genes = {}, None
+    for path in paths:
+        tbl = pq.read_table(path)
+        file_genes = json.loads(tbl.schema.metadata[b"pie"])["genes"].get(dataset)
+        if file_genes is None:
+            continue
+        if genes is not None and list(file_genes) != genes:
+            raise ValueError(f"{path}: {dataset} gene axis differs between files")
+        genes = list(file_genes)
+        df = tbl.to_pandas()
+        df = df[df["dataset"] == dataset]
+        out.update({(r.context, r.perturbation): (np.asarray(r.p_de, np.float64), np.asarray(r.lfc_pred, np.float64),
+                                                  np.asarray(r.delta_p_pred, np.float64)) for r in df.itertuples()})
+    if genes is None:
+        raise ValueError(f"no PIE predictions for dataset {dataset!r} in {paths}")
+    return out, genes
 
 
 def to_log2fold(p_de, lfc, delta, mode, ctrl_log1p_mean=None, thr=0.5):

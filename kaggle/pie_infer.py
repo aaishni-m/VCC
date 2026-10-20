@@ -222,10 +222,20 @@ log("predicting", {k: len(v) for k, v in query.items()})
 import torch
 device = "cuda" if torch.cuda.is_available() else "cpu"
 torch.set_num_threads(os.cpu_count() or 8)
-log("device", device, "threads", torch.get_num_threads())
-preds = predict_loaded(loaded, RowSource("query", qp), dirs, device, 8)
-out = write_predictions_parquet(preds, OUT / "pie_predictions.parquet")
-log("wrote", out, [(b.dataset, len(b.contexts), len(b.genes)) for b in preds.blocks])
+if device == "cpu" or not torch.cuda.is_bf16_supported():
+    # Trained in bf16-mixed. The token sources are float16 on disk and stay half under mixed precision: very slow on
+    # CPU (run 5 hit Kaggle's 12 h limit), and Kaggle's T4 has no native bf16. Full fp32 casts everything to float32.
+    loaded.config = loaded.config.model_copy(update={"trainer": loaded.config.trainer.model_copy(
+        update={"precision": "32-true"})})
+log("device", device, "threads", torch.get_num_threads(), "precision", loaded.config.trainer.precision)
+# one context at a time, each saved as it finishes (evidence is built once, then read from PIE_CACHE_DIR)
+for key in ["replogle.rpe1", "vcc26.A", "vcc26.B", "vcc26.C"]:
+    t = time.time()
+    qk = TMP / f"pie_query_{key}.json"; json.dump({key: query[key]}, open(qk, "w"))
+    preds = predict_loaded(loaded, RowSource("query", qk), dirs, device, 8)
+    out = write_predictions_parquet(preds, OUT / f"pie_predictions_{key}.parquet")
+    log("wrote", out.name, [(b.dataset, len(b.contexts), len(b.genes)) for b in preds.blocks],
+        f"in {time.time() - t:.0f}s")
 ''')
 run([PY, str(inner), str(controls), str(panel_meta)])
 log("done")

@@ -294,8 +294,8 @@ for c in (1.5, 2.0, 3.0):
     VARIANTS[f"lfc_c{c}_kall"] = (c * lfc, "lfc")
 
 # PIE (Verma et al. 2026) zero-shot predictions for this panel, when a vcc-pie output is attached
-PIE_PQ = next(Path("/kaggle/input").rglob("pie_predictions.parquet"), None)
-if PIE_PQ is not None:
+PIE_PQ = sorted(Path("/kaggle/input").rglob("pie_predictions*.parquet"))
+if PIE_PQ:
     from models.pie_convert import MODES, load_pie, profiles
     pie, pie_genes = load_pie(PIE_PQ, "replogle")
     Xc = X_rel.astype(np.float64)
