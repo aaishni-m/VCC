@@ -13,7 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-MODEL = "__MODEL__"   # replaced by the workflow (b2 | b4 | b5 | b5v2 | b5v3 | b6 | b7)
+MODEL = "__MODEL__"   # replaced by the workflow (b2 | b4 | b5 | b5v2 | b5v3 | b6 | b7 | pie)
 PREP = "__PREP__"     # "dry-run" or "full"
 
 
@@ -41,7 +41,8 @@ controls = find_one("context_A.h5ad").parent
 env = dict(os.environ,
            VCC_CONTROLS_DIR=str(controls),
            VCC_PERTURB_CSV=str(find_one("vcc-perturb.csv")),
-           VCC_OUTPUTS_DIR="/kaggle/temp/outputs")   # 14 GB .h5ad stays off the 20 GB working dir
+           VCC_OUTPUTS_DIR="/kaggle/temp/outputs",
+           VCC_PIE_PREDICTIONS="/kaggle/input/**/pie_predictions_vcc26.*.parquet")   # 14 GB .h5ad stays off the 20 GB working dir
 
 run([sys.executable, "-m", "pip", "install", "-q", "anndata", "uv"])
 for step in {"b4": ["b4"], "b5": ["b5"], "b5v2": ["b5v2"], "b5v3": ["b5v3"], "b6": ["b5", "b6"], "b7": ["b5", "b6", "b7"]}.get(MODEL, []):
@@ -54,7 +55,7 @@ vcc = str(Path.home() / ".local" / "bin" / "vcc")
 src = f"/kaggle/temp/outputs/{MODEL}_submission.h5ad"
 genes, perts = str(controls / "gene_names.csv"), str(controls / "pert_counts.csv")
 out = f"/kaggle/working/{MODEL}_submission.vcc"
-if MODEL in ("b5v3", "b6", "b7"):
+if MODEL in ("b5v3", "b6", "b7", "pie"):
     # too dense for `vcc prep` on 30 GiB (see models/stream_package.py): package in a streaming way, after a
     # self-test that requires byte-level agreement with real `vcc prep` on a subset
     # run inside vcc-cli's own tool environment, so anndata/pandas/h5py are exactly the ones `vcc prep` uses

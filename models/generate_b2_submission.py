@@ -56,6 +56,7 @@ Usage:
     python models/generate_b2_submission.py --model b5   # B5: profiles from gene_transfer_b5.py
     python models/generate_b2_submission.py --model b5v2 # B5 v2: Zhu-thresholded, agreement-weighted (gene_transfer_b5v2.py)
     python models/generate_b2_submission.py --model b5v3 # B5 v3: dense log2 fold change, T5 fold transform (gene_transfer_b5v3.py)
+    python models/generate_b2_submission.py --model pie  # PIE (Verma et al. 2026) zero-shot, per-context, delta mode (pie_convert.py)
     python models/generate_b2_submission.py --model b6   # B6: top-K of B5, sparse T4 transform (gene_transfer_b6.py)
     python models/generate_b2_submission.py --model b7   # B7: magnitude-preserving external direction (gene_transfer_b7.py)
 """
@@ -268,7 +269,19 @@ def main(model="b2"):
     combined_obs = build_combined_obs(target_genes)
     assert combined_obs.shape[0] == n_obs_total
 
-    if model == "b5v3":
+    if model == "pie":
+        # PIE (Verma, R. et al. (2026) PIE: Generalizing perturbation effects across unseen perturbations, contexts and
+        # datasets; outputs under the Arc PIE Model Non-Commercial License): one profile set PER CONTEXT, built inside the
+        # context loop from kaggle/pie_infer.py's parquet files ($VCC_PIE_PREDICTIONS glob)
+        import glob
+        import os
+        from models.pie_convert import load_pie
+        pie_files = sorted(glob.glob(os.environ["VCC_PIE_PREDICTIONS"], recursive=True))
+        pie_preds, pie_genes = load_pie(pie_files, "vcc26")
+        print(f"[PIE-gen] {len(pie_preds)} (context, target) predictions on {len(pie_genes)} genes from {len(pie_files)} files")
+        z_matrix_full = None
+        gene_betas = np.ones(len(target_genes))
+    elif model == "b5v3":
         # log2 fold changes, already on the context gene axis (gene_transfer_b5v3.py); beta 1 = use them as saved
         meta = json.loads((cfg.PROJECT_ROOT / "models" / "b5v3_meta.json").read_text())
         assert meta["target_genes"] == [g.strip() for g in target_genes], "b5v3_meta.json target order differs"
@@ -284,7 +297,7 @@ def main(model="b2"):
             gene_betas = np.where(real_mask, BETA_REAL, BETA_MEAN)
         z_matrix_full = align_z_matrix_to_context(z_matrix_vp, gene_cols, context_genes)  # (300, 18533)
 
-    transform = (t5_log2_fold if model == "b5v3" else
+    transform = (t5_log2_fold if model in ("b5v3", "pie") else
                  t4_sparse_thinning if model in ("b6", "b7") else t2_log1p_additive)  # see gene_transfer_b6.py
     out_path = cfg.OUTPUTS / f"{model}_submission.h5ad"
     print(f"[B2-gen] initializing combined output file at {out_path} "
@@ -304,6 +317,19 @@ def main(model="b2"):
             n_control = adata.n_obs
 
             ref = load_or_build(context)
+            if model == "pie":
+                from models.pie_convert import profiles, testable_genes
+                Xn = X_src.astype(np.float64)
+                Xn = sp.diags(1e4 / np.maximum(np.asarray(Xn.sum(1)).ravel(), 1)) @ Xn
+                Xn.data = np.log1p(Xn.data)
+                ctx_mean = np.asarray(Xn.mean(0)).ravel()
+                ctx_test = testable_genes(X_src)
+                z_matrix_full = profiles(pie_preds, pie_genes, [str(g) for g in context_genes], context,
+                                         [g.strip() for g in target_genes], "delta", ctx_mean, testable_dst=ctx_test)
+                del Xn
+                print(f"[PIE-gen] {context}: {int(ctx_test.sum())} testable genes; changed genes/target median "
+                      f"{np.median((z_matrix_full != 0).sum(1)):.0f}; missing targets "
+                      f"{sum((context, g.strip()) not in pie_preds for g in target_genes)}", flush=True)
 
             for start in range(0, len(target_genes), CHUNK_GENES):
                 gene_chunk = target_genes[start:start + CHUNK_GENES]
@@ -351,5 +377,5 @@ def main(model="b2"):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", choices=["b2", "b4", "b5", "b5v2", "b5v3", "b6", "b7"], default="b2")
+    parser.add_argument("--model", choices=["b2", "b4", "b5", "b5v2", "b5v3", "b6", "b7", "pie"], default="b2")
     main(parser.parse_args().model)
