@@ -1,0 +1,15 @@
+{
+ "B5like_T2": {
+  "direction_top200_level": 0.94,
+  "mean_ratio": 0.576,
+  "covered_kd": 184
+ },
+ "eq_plus_mean": {
+  "alpha": 0.4857,
+  "beta_mean": 0.0189
+ },
+ "b5dir_plus_mean": {
+  "alpha": 4.1222,
+  "beta_mean": 0.0191
+ }
+}
