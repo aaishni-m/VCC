@@ -70,13 +70,22 @@ def combine(t, weights, shrink=None):
 
 
 # ---------------- fitting on training lines ----------------
-def fit_scale(tables, predict):
-    """alpha = sum x*y / sum x^2 over tested genes, each line weighted equally (so big lines don't dominate)."""
+_SCALE_CACHE, _GRAM_CACHE = {}, {}       # per (line, predictor key): pure speed-up, same arithmetic as uncached
+
+
+def fit_scale(tables, predict, key=None):
+    """alpha = mean over training lines of (sum x*y / sum x^2 over tested genes): each line weighted equally."""
     num = den = 0.0
     for t in tables:
-        p = predict(t); m = t["tested"]
-        y = np.nan_to_num(t["Y"])
-        sxy, sxx = float((p * y)[m].sum()), float((p * p)[m].sum())
+        ck = (t["line"], key)
+        if key is not None and ck in _SCALE_CACHE:
+            sxy, sxx = _SCALE_CACHE[ck]
+        else:
+            p = predict(t); m = t["tested"]
+            y = np.nan_to_num(t["Y"])
+            sxy, sxx = float((p * y)[m].sum()), float((p * p)[m].sum())
+            if key is not None:
+                _SCALE_CACHE[ck] = (sxy, sxx)
         if sxx > 0:
             num += sxy / sxx * 1.0; den += 1.0
     return num / den if den else 0.0
@@ -85,17 +94,25 @@ def fit_scale(tables, predict):
 def fit_ridge(tables, lam, shrink=None):
     """Shared weights over standardised source columns (+ an 'any source' indicator), ridge lambda; lines weighted equally.
     Returns {source: weight} in original units and the column scales."""
-    G = np.zeros((len(SOURCES), len(SOURCES))); b = np.zeros(len(SOURCES)); scale = np.ones(len(SOURCES))
-    cols = []
+    G = np.zeros((len(SOURCES), len(SOURCES))); b = np.zeros(len(SOURCES))
+    stats = []
     for t in tables:
-        m = t["tested"]
-        Xs = [np.nan_to_num(src(t, s, shrink)) if src(t, s) is not None else np.zeros(t["Y"].shape) for s in SOURCES]
-        cols.append((np.stack([x[m] for x in Xs], 1), np.nan_to_num(t["Y"])[m]))
-    sd = np.sqrt(np.mean([np.mean(A ** 2, 0) for A, _ in cols], 0)); sd[sd == 0] = 1
-    for A, y in cols:
-        A = A / sd; n = len(y)
-        G += A.T @ A / n; b += A.T @ y / n
-    w = np.linalg.solve(G / len(cols) + lam * np.eye(len(SOURCES)), b / len(cols)) / sd
+        ck = (t["line"], shrink)
+        if ck not in _GRAM_CACHE:                                # A^T A / n, A^T y / n, mean(A^2) per line (unscaled)
+            m = t["tested"]
+            Xs = [np.nan_to_num(src(t, s, shrink)) if src(t, s) is not None else np.zeros(t["Y"].shape) for s in SOURCES]
+            A = np.stack([x[m] for x in Xs], 1); y = np.nan_to_num(t["Y"])[m]; n = len(y)
+            _GRAM_CACHE[ck] = (A.T @ A / n, A.T @ y / n, np.mean(A ** 2, 0))
+        stats.append(_GRAM_CACHE[ck])
+    cols = stats
+    sd = np.sqrt(np.mean([msq for _, _, msq in stats], 0)); sd[sd == 0] = 1
+    for AtA, Aty, _ in stats:                                    # (A/sd)^T (A/sd) / n = D^-1 (A^T A / n) D^-1
+        G += AtA / np.outer(sd, sd); b += Aty / sd
+    present = np.diag(G) > 0                                    # a source absent from every training line gets weight 0
+    w = np.zeros(len(SOURCES))
+    if present.any():
+        Gp = (G / len(cols))[np.ix_(present, present)] + lam * np.eye(present.sum())
+        w[present] = np.linalg.lstsq(Gp, (b / len(cols))[present], rcond=None)[0] / sd[present]
     return dict(zip(SOURCES, w))
 
 
@@ -128,11 +145,15 @@ def metrics(t, P):
             "covered": covered}
 
 
-def summarise(line, name, cfg, M, rng):
+def subset(M, idx):
+    return {k: v[idx] for k, v in M.items()}
+
+
+def summarise(line, name, cfg, M, rng, subset_name="all"):
     n = len(M["pds_proxy"])
     boot = lambda v: np.nanpercentile([np.nanmean(v[rng.integers(0, n, n)]) for _ in range(200)], [2.5, 97.5])  # noqa: E731
     r2 = 1 - M["r2_num"].sum() / M["r2_den"].sum()
-    row = {"line": line, "model": name, "config": json.dumps(cfg), "n_knockdowns": n,
+    row = {"line": line, "subset": subset_name, "model": name, "config": json.dumps(cfg), "n_knockdowns": n,
            "covered_frac": float(M["covered"].mean())}
     for k in ("pds_proxy", "dir_sig", "nmae_sig"):
         lo, hi = boot(M[k]); row[k] = float(np.nanmean(M[k])); row[k + "_ci"] = f"{lo:.3f}..{hi:.3f}"
@@ -147,12 +168,25 @@ def candidates(train, inner_lines):
     eq = {s: 1.0 for s in SOURCES}
     for s in SOURCES:                                            # each source alone, scale fitted
         f = lambda t, s=s: combine(t, {s: 1.0})                  # noqa: E731
-        a = fit_scale(train, f)
+        a = fit_scale(train, f, key=f"src_{s}")
         out[f"src_{s}"] = ({"alpha": round(a, 4)}, lambda t, f=f, a=a: a * f(t))
+    # B5-style direction: unit(K562 z) + unit(Zhu z), scale fitted (B5's 0.5 x H1-mean term cannot be reproduced for other
+    # held-out lines without using a response average; omitted and documented)
+    def b5dir(t):
+        out = np.zeros(t["Y"].shape)
+        for s in ("k562", "zhu"):
+            z = t.get(f"Z_{s}")
+            if z is None:
+                continue
+            z = np.nan_to_num(z.astype(np.float64))
+            out += z / (np.linalg.norm(z, axis=1, keepdims=True) + 1e-12)
+        return out
+    a = fit_scale(train, b5dir, key="b5dir")
+    out["b5_dir"] = ({"alpha": round(a, 4)}, lambda t, a=a: a * b5dir(t))
     for c in (1.0, 2.0):                                         # B5v3-style: equal mean x fixed c (k562 + zhu only)
         out[f"b5v3_c{c:g}"] = ({"c": c}, lambda t, c=c: c * combine(t, {"k562": 1.0, "zhu": 1.0}))
     f = lambda t: combine(t, eq)                                 # noqa: E731
-    a = fit_scale(train, f)
+    a = fit_scale(train, f, key="eq")
     out["B_equal_fitted"] = ({"alpha": round(a, 4)}, lambda t, a=a: a * combine(t, eq))
     # A: denoise by each source's own |z|, threshold chosen by inner LOLO on the training lines
     best = None
@@ -161,13 +195,13 @@ def candidates(train, inner_lines):
         for v in inner_lines:
             tr = [t for t in train if t["line"] != v]; te = [t for t in train if t["line"] == v][0]
             ff = lambda t, th=th: combine(t, eq, shrink=th)      # noqa: E731
-            aa = fit_scale(tr, ff)
+            aa = fit_scale(tr, ff, key=f"eq_shrink{th}")
             sc.append(np.nanmean(metrics(te, aa * ff(te))["pds_proxy"]))
         if best is None or np.mean(sc) > best[1]:
             best = (th, np.mean(sc))
     th = best[0]
     ff = lambda t, th=th: combine(t, eq, shrink=th)              # noqa: E731
-    a = fit_scale(train, ff)
+    a = fit_scale(train, ff, key=f"eq_shrink{th}")
     out["A_denoise_equal"] = ({"shrink_z": th, "alpha": round(a, 4)}, lambda t, a=a, ff=ff: a * ff(t))
     # C: shared ridge over sources, lambda by inner LOLO (on r2, the magnitude-sensitive proxy)
     best = None
@@ -180,6 +214,13 @@ def candidates(train, inner_lines):
         if best is None or np.mean(sc) > best[1]:
             best = (lam, np.mean(sc))
     w = fit_ridge(train, best[0])
+    pos = {k: max(v, 0.0) for k, v in w.items()}                 # B learned: ridge weights clipped >= 0, renormalised,
+    tot = sum(pos.values()) or 1.0                               # then a per-knockdown weighted MEAN x fitted alpha
+    lw = {k: v / tot for k, v in pos.items()}
+    fl = lambda t, lw=lw: combine(t, lw)                         # noqa: E731
+    al = fit_scale(train, fl, key="learned:" + json.dumps({k: round(v, 12) for k, v in lw.items()}))
+    out["B_learned_weights"] = ({"weights": {k: round(v, 3) for k, v in lw.items()}, "alpha": round(al, 4)},
+                                lambda t, al=al, fl=fl: al * fl(t))
     out["C_ridge"] = ({"lambda": best[0], "w": {k: round(v, 4) for k, v in w.items()}}, lambda t, w=w: ridge_predict(t, w))
     w2 = fit_ridge(train, best[0], shrink=th)
     out["D_ridge_denoise"] = ({"lambda": best[0], "shrink_z": th, "w": {k: round(v, 4) for k, v in w2.items()}},
@@ -188,20 +229,44 @@ def candidates(train, inner_lines):
 
 
 def main(lines, out_csv):
+    import pandas as _pd
+    vcc = set(_pd.read_csv("D:/VCC_outputs/b5v2in/controls/pert_counts.csv")["target_gene"].str.strip())
     tables = {L: load(L) for L in lines}
     log("loaded", {L: tables[L]["Y"].shape for L in lines})
     rng = np.random.default_rng(0)
     rows = []
+    per_kd, dirs = {}, {}
+    h1_out = {}
     for held in lines:
         train = [tables[L] for L in lines if L != held]
         inner = [t["line"] for t in train]
+        t0 = time.time()
         cands = candidates(train, inner)
+        t_fit = time.time() - t0
+        t = tables[held]
+        ov = np.array([p.split(":")[-1] in vcc for p in t["perts"]])
         for name, (cfg, pred) in cands.items():
-            rows.append(summarise(held, name, cfg, metrics(tables[held], pred(tables[held])), rng))
+            M = metrics(t, pred(t))
+            r = summarise(held, name, cfg, M, rng); r["fit_seconds_all_candidates"] = round(t_fit, 1)
+            r["n_genes_tested_median"] = int(np.median(t["tested"].sum(1))); rows.append(r)
+            if ov.sum() >= 5:
+                rows.append(summarise(held, name, cfg, subset(M, ov), rng, "vcc_target_overlap"))
+            per_kd.setdefault(held, {})[name] = M["pds_proxy"]
+            dirs.setdefault(held, {})[name] = M["dir_sig"]
+            if held == "H1":                                     # hand-off to kaggle/localbench_h1.py: H1 predictions
+                h1_out[f"V_{name}"] = pred(t).astype(np.float32)  # from models fitted WITHOUT any H1 response
         log(held, "done:", {r["model"]: round(r["pds_proxy"], 3) for r in rows if r["line"] == held})
     df = pd.DataFrame(rows)
     Path(out_csv).parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(out_csv, index=False)
+    np.savez_compressed(Path(out_csv).with_suffix(".perkd.npz"),
+                        **{f"{L}__{m}__{k}": v for d, k in ((per_kd, "pds"), (dirs, "dir")) for L, mm in d.items()
+                           for m, v in mm.items()},
+                        **{f"{L}__perts": tables[L]["perts"] for L in lines})
+    if h1_out:
+        np.savez_compressed(Path(out_csv).parent / "h1_profiles.npz", genes=tables["H1"]["genes"],
+                            perts=np.array([q.split(":")[-1] for q in tables["H1"]["perts"]]), **h1_out)
+    df = df[df["subset"] == "all"]
     summ = df.groupby("model")[["pds_proxy", "dir_sig", "nmae_sig", "r2"]].mean().sort_values("pds_proxy", ascending=False)
     print(summ.round(4).to_string())
     return df
