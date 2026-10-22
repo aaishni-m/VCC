@@ -38,8 +38,13 @@ T0 = time.time()
 TMP, OUT = Path("/kaggle/temp/h1bench"), Path("/kaggle/working")
 TMP.mkdir(parents=True, exist_ok=True)
 URL = "https://storage.googleapis.com/arc-institute-virtual-cell-atlas/virtual-cell-challenge/2025/train/adata_Training.h5ad"
-N_PRED, CAP_REAL, ANCHOR_SPLITS = 400, 400, 5
-CTRL_HELD_CAP = 10000          # memory: the full ~19k held-out controls x 18k genes OOM-killed cell-eval2 baseline (run 3)
+# MODE "full": official-like (400 real cells/knockdown). MODE "reduced": the size the RPE1 bench ran at, for Kaggle's
+# 31 GB CPU box (runs 3 and 4 were OOM-killed in `cell-eval2 baseline` at 73k x 18k and 64k x 12k cells x genes).
+MODE = "reduced"
+N_PRED, ANCHOR_SPLITS = 400, 5
+CAP_REAL = 400 if MODE == "full" else 250
+CTRL_HELD_CAP = 10000 if MODE == "full" else 8000
+MIN_CTRL_CPM = 0.0 if MODE == "full" else 1.0     # reduced: also drop genes below 1 CPM in the released controls
 RUN_VARIANTS = ["B_equal_fitted", "b5_dir", "B5like_T2", "eq_plus_mean", "b5dir_plus_mean"]
 T2_BETA, PB_N, PB_CELLS = 1.5, 300, 15     # B5's T2 emitter settings (models/transform_candidates.py, pseudobulk_reference)
 rng = np.random.default_rng(0)
@@ -87,6 +92,10 @@ for i, g in enumerate(genes):
 keep_gene = np.array(sorted(pos.values())); G = genes[keep_gene]
 log(f"scoring gene axis: {len(G)} of {len(genes)} genes (H1 processed gene list)")
 assert len(G) > 10000, f"only {len(G)} H1 genes match the profile gene symbols -- gene identifier mismatch"
+try:
+    log("machine RAM:", [l for l in open("/proc/meminfo") if l.startswith("MemTotal")][0].strip(), "| mode", MODE)
+except OSError:
+    pass
 panel = [p for p in p_perts if (lab == p).sum() >= 50]
 log(f"panel: {len(panel)} of {len(p_perts)} profiled knockdowns have >= 50 real cells; variants: {list(variants)}")
 
@@ -114,6 +123,12 @@ X_rel = read_rows(ntc_rel).astype(np.float32)
 real_rows = np.sort(np.concatenate([real_pert, ntc_held]))
 X_real = read_rows(real_rows).astype(np.float32)
 assert np.all(X_real.data == np.round(X_real.data)), "H1 X is not raw integer counts"
+if MIN_CTRL_CPM > 0:                                    # reduced mode: drop genes barely expressed in released controls
+    _lib = np.maximum(np.asarray(X_rel.sum(1)).ravel(), 1)
+    _cpm = np.asarray((sp.diags(1e6 / _lib) @ X_rel).mean(0)).ravel()
+    _k = _cpm > MIN_CTRL_CPM
+    X_rel, X_real, G = X_rel[:, _k].tocsr(), X_real[:, _k].tocsr(), G[_k]
+    log(f"reduced mode: kept {int(_k.sum())} genes with control mean CPM > {MIN_CTRL_CPM}")
 real = ad.AnnData(X=X_real, obs=pd.DataFrame({"target_gene": lab[real_rows]}, index=[f"c{i}" for i in real_rows]),
                   var=pd.DataFrame(index=G))
 real.write_h5ad(TMP / "real.h5ad")
