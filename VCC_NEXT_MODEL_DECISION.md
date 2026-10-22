@@ -1,14 +1,16 @@
-# VCC 2026 next model — decision (22 Oct 2026, provisional until the H1 official benchmark returns)
+# VCC 2026 next model — decision (22 Oct 2026, updated after the official-scorer H1 comparison)
 
-**Recommendation: B (simplified) — advance the equal-weight source average with a fitted scale (~0.4×); do not continue
-ridge or denoising; keep B5 as the fallback until the official H1 benchmark confirms.**
+**Recommendation: D — keep B5's structure (transferred direction + average-response term) as the primary candidate,
+rebuilt from training lines only for compliance; do NOT adopt the equal-weight average as a replacement yet. Next: one
+decomposition run to separate the emitter (T2 vs T5) from the average-response term.**
 
-Every source-based model beats zero by a wide margin on ranking and direction, but the four sources carry little
-effect-size information (best r² 0.05). Among them, the plain equal-weight average with one fitted shrink factor is the
-best or tied-best candidate on all four well-powered held-out lines; learning per-source weights or a ridge model adds
-nothing, and denoising hurts.
+The official-scorer H1 comparison (reduced mode, report section 10) overturns the proxy result: with the emitter fixed,
+the equal-weight average is statistically indistinguishable from B5-direction on all six metrics. What does move the
+official score is (a) adding an average-response term (fid and jac up, significant) and (b) B5's full structure with
+its T2 emitter (overall 0.229 vs 0.181), whose two ingredients are confounded in this run. Ridge and denoising remain
+dropped on the proxy evidence.
 
-## Evidence for
+## Evidence from the pseudobulk proxies (11 lines), still valid as far as it goes
 
 - Beats zero on all 4 well-powered lines: ranking +0.28 to +0.36, direction +0.06 to +0.30 (paired intervals far above 0).
 - Beats B5-direction on ranking in RPE1 (+0.008), HepG2 (+0.019), Jurkat (+0.027) and on direction in the same three
@@ -25,26 +27,34 @@ nothing, and denoising hurts.
 3. "B5-direction" is not B5 as submitted (no 0.5 × H1 average, no T2 emitter).
 4. Effect sizes barely beat zero (r² ≤ 0.05; H1 r² negative), so mse is likely to stay at 0 and nmae to gain little.
 
-## Decision table
+## Decision table (official = H1, cell-eval2, reduced mode; proxy = 4 well-powered lines)
 
-| Candidate | Held-out performance (proxy ranking, well-powered mean) | Uncertainty | Beats B5? | Recommendation |
+| Candidate | Held-out performance | Uncertainty | Beats B5? | Recommendation |
 | --- | --- | --- | --- | --- |
-| Zero | 0.500 | — | No | Baseline only |
-| K562 alone | 0.813 | worse than equal on H1 (−0.034, CI excludes 0) | not on H1 | Drop |
-| Zhu alone | 0.624 | clearly worse | No | Drop |
-| **Equal average, fitted scale** | **0.820** | +0.008 to +0.027 vs B5-dir on 3/4 lines; H1 n.s. | B5-direction: yes on 3/4 proxy lines; B5 as submitted: unknown | **Advance; confirm on official H1** |
-| Learned weighted average | 0.816 | −0.003 to −0.008 vs equal | unknown | Drop (no gain, weights favour a source with 11/300 coverage) |
-| Ridge | 0.816 | −0.003 to −0.008 vs equal | unknown | Drop in this form |
-| Denoised average | 0.724 | −0.06 to −0.12 vs equal | No | Drop (helps only on weak lines) |
-| Ridge + denoise | 0.716 | as above | No | Drop |
-| B5-direction (proxy of B5) | 0.805 | — | — | Reference |
-| B5v3-style ×1 / ×2 | 0.810 / 0.810 | nmae on H1 1.06 / 1.37 (overshoot) | No (×2 lost on leaderboard) | Drop the fixed scale |
-| B5 as submitted | not evaluated under this protocol | — | — | Fallback for the final |
+| Zero | proxy rank 0.500 | — | No | Baseline only |
+| K562 alone | proxy 0.813 | worse than equal on the H1 proxy | No | Drop |
+| Zhu alone | proxy 0.624 | clearly worse | No | Drop |
+| Equal average, fitted scale (T5) | official H1 0.181; proxy 0.820 | vs B5-direction: no official metric differs (pds +0.023, CI -0.017..+0.062) | No (official H1) | Do not adopt alone |
+| Equal average + average response (T5) | official H1 0.194 | +0.035 fid, +0.009 jac vs equal (CIs > 0) | No (0.194 vs B5-like 0.229) | Keep as a component |
+| Learned weighted average | proxy 0.816 | -0.003..-0.008 vs equal (proxy) | not evaluated officially | Drop |
+| Ridge | proxy 0.816 | -0.003..-0.008 vs equal (proxy) | not evaluated officially | Drop |
+| Denoised average | proxy 0.724 | -0.06..-0.12 vs equal (proxy) | No | Drop |
+| B5-direction (T5) | official H1 0.176 | — | — | Reference |
+| B5-direction + average response (T5) | official H1 0.190 | +0.047 fid, +0.009 jac vs B5-dir | — | Component |
+| **B5-like as submitted (T2, training-line mean)** | **official H1 0.229** | beats equal on fid +0.14, jac +0.05, nmae +0.013, reach +0.035 (CIs > 0) | is the B5 structure | **Primary candidate; decompose T2 vs mean term** |
+| B5v3-style x1 / x2 | proxy 0.810; leaderboard x2 = 0.107 | nmae overshoot | No | Drop the fixed scale |
+| B5 exactly as submitted | cannot be scored on H1 without leakage (its mean term and scale were fitted on H1) | — | — | Fallback = B5-like rebuilt without copied rows |
 
-## Next action
+## Strongest evidence against this recommendation
 
-1. Read the official H1 benchmark (running on Kaggle): adopt the equal average only if its overall scaled score on H1
-   beats B5-direction and neither nmae nor reach collapses.
-2. Smallest experiment to resolve the H1 doubt if it is a tie: the same comparison with B5's 0.5 × average-response
-   term added to both (built from the training lines' mean response, never H1's), on H1 only.
-3. Independently, start the final-phase plumbing (vcc-cli 0.3.0, D/E/F contexts, final target coverage).
+H1 rewards dense significance calling (its responses are dense), and T2 is a dense caller. On the real A/B/C
+leaderboard, B5's T2 emission scored fid -0.003 and jac -0.010 (chance). The H1 gain of B5-like over the T5 variants is
+mostly fid and jac, so it may not transfer to the challenge panel at all.
+
+## Next action (smallest experiment that resolves the uncertainty)
+
+1. Decomposition on H1, reusing the saved bundle (~1 h): the B5-like profile emitted with T5, and the equal-average +
+   average-response profile emitted with T2. Two variants answer "emitter or mean term?".
+2. Check the dense-calling concern directly: report n_pred (our significant genes) vs N_conf per knockdown for T2 and T5
+   on H1, and compare with A/B/C (where N_conf passes the >= 10 gate for only 209-261 of 300 knockdowns).
+3. In parallel, final-phase plumbing: vcc-cli 0.3.0 + packager self-test, D/E/F contexts, final target coverage.

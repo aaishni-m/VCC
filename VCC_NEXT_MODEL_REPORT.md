@@ -11,7 +11,7 @@ an official metric, not an official score; **[pending]** = launched, no result y
 | Training table (`models/xline_data.py`) | [measured] done | 55 min, 12 files, validator: no hard failures (`VCC_NEXT_MODEL_DATA_AUDIT.md`) |
 | Leave-one-line-out comparison (`models/xline_models.py`) | [measured] done | 11 held-out lines × 13 candidates, 68 min, 0 failed fits. Pure-speed caching added mid-run; verified identical to the uncached code (max difference 2e-16) before restarting |
 | Paired analysis (`models/xline_analyze.py`) | [measured] done | per-knockdown paired bootstrap, 2,000 resamples |
-| Official-scorer H1 benchmark (`kaggle/localbench_h1.py`, Kaggle `vcc-localbench-h1`) | [pending] running | 6 candidates, 400 cells/knockdown, 5 anchor splits; predictions from `results/h1_profiles_bench.npz`, made without H1 |
+| Official-scorer H1 benchmark (`kaggle/localbench_h1.py`, Kaggle `vcc-localbench-h1` v6) | [measured] done, **reduced mode** | 5 variants; runs 3-5 were OOM-killed (exit -9) in `cell-eval2 baseline` on Kaggle's 31 GB box, so v6 caps real groups at 250 cells, uses 8,000 held-out controls and 11,957 genes (> 1 CPM); 400 predicted cells/knockdown, 5 anchor splits. See section 10 |
 | Official scores on A/B/C or D/E/F | [not run] | validation leaderboard closes 22 Oct; final phase shows no scores |
 
 Reproduce: `python models/xline_data.py` → `python models/xline_check.py` → `python models/xline_models.py` →
@@ -124,3 +124,43 @@ separate the top four.
 - Compliance (rules page, 22 Oct): published results may train or fine-tune a model but not be submitted or used to
   revise predictions. The equal-weight average with a scale fitted leave-one-line-out on public screens is a fitted
   model; B2's copied H1 rows are not allowed; drop any copied published rows.
+
+## 10. Official-scorer H1 comparison [measured, reduced mode] (22 Oct, Kaggle `vcc-localbench-h1` v6)
+
+Real VCC-2025 H1 cells, `cell-eval2` `vcc2026` preset, scaled like the leaderboard ((u - b)/(r - b) against this
+bundle's own context-mean baseline and 5 replicate anchors). 144 knockdowns with >= 50 real cells. **Reduced mode**
+(250 real cells/knockdown instead of 400, 8,000 held-out controls, 11,957 genes): fewer real cells give the reference fewer
+significant genes, so fid / jac / reach are not comparable to official numbers; every variant gets identical settings,
+so the comparison between variants is fair. Predictions built without any H1 response (`results/h1_profiles_bench.npz`,
+`results/h1_ablation_profiles.npz`, `models/h1_ablation.py`). Per-knockdown files: `results/h1_official_reduced_perkd_*.csv`.
+
+| Variant | Emitter | Overall | pds | mse | nmae | fid | reach | jac |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| B5-like as submitted (direction at B5's level + training-line average response at B5's 0.576 ratio) | T2 | **0.229** | 0.568 | 0 | **-0.027** | **0.540** | **0.070** | **0.225** |
+| Equal average + average response (alpha 0.49, beta 0.019, fitted on training lines) | T5 | 0.194 | 0.640 | 0 | -0.046 | 0.393 | 0.042 | 0.133 |
+| B5-direction + average response (alpha 4.12, beta 0.019) | T5 | 0.190 | 0.572 | 0 | -0.041 | 0.414 | 0.069 | 0.126 |
+| Equal average, fitted scale (0.44) | T5 | 0.181 | **0.645** | 0 | -0.049 | 0.346 | 0.031 | 0.111 |
+| B5-direction, fitted scale | T5 | 0.176 | 0.595 | 0 | -0.043 | 0.350 | 0.052 | 0.104 |
+
+Paired bootstrap over the 144 knockdowns' per-knockdown raw metrics (2,000 resamples; positive = first variant better):
+
+| Comparison | pds | nmae | fid | reach | jac |
+| --- | --- | --- | --- | --- | --- |
+| Equal - B5-direction (both T5) | +0.023 (-0.017, +0.062) | -0.004 (-0.010, +0.002) | -0.003 (-0.027, +0.022) | -0.019 (-0.043, +0.006) | +0.003 (-0.003, +0.010) |
+| B5-like (T2) - equal (T5) | -0.036 (-0.075, +0.006) | +0.013 (+0.004, +0.022) | +0.144 (+0.114, +0.177) | +0.035 (+0.008, +0.064) | +0.047 (+0.032, +0.061) |
+| Equal + mean - equal | -0.002 (-0.042, +0.038) | +0.002 (-0.003, +0.007) | +0.035 (+0.023, +0.050) | +0.010 (-0.014, +0.035) | +0.009 (+0.007, +0.012) |
+| B5-dir + mean - B5-dir | -0.011 (-0.047, +0.028) | +0.001 (-0.004, +0.006) | +0.047 (+0.032, +0.065) | +0.015 (-0.016, +0.047) | +0.009 (+0.007, +0.011) |
+
+Reading:
+- **Transfer model (emitter fixed, T5): equal average = B5-direction within noise.** No metric differs significantly;
+  pds favours the equal average and reach favours B5-direction, neither beyond noise. The proxy gain of section 4 does
+  not survive the official scorer on H1.
+- **The average-response term helps** both directions on fid and jac (intervals above 0), without hurting pds.
+- **B5-like as submitted is best overall (0.229)**, through fid, jac, nmae and reach. It differs from the T5 variants in
+  two ways at once (the T2 emitter and a larger average-response term), so this run cannot say which carries the gain.
+- **Strong caution on transfer to the challenge:** H1's responses are dense (median ~2,000 reference-significant genes per
+  knockdown at full depth), which rewards dense calling such as T2's redraw. On the A/B/C leaderboard the same B5
+  structure scored fid -0.003 and jac -0.010, i.e. at chance. H1, like the RPE1 bench (fid 0.66), likely overstates
+  what T2 earns on the challenge's weaker regulator panel.
+- mse is 0 (clamped) for every variant and nmae is slightly negative for every variant: no candidate predicts effect
+  sizes better than this bundle's context-mean baseline.
