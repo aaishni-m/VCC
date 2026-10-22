@@ -19,7 +19,7 @@ dropped on the proxy evidence.
 - Its single parameter (scale 0.39–0.44) is stable across all 11 folds and explains B5v3's leaderboard nmae loss.
 - It is a fitted model (scale learned leave-one-line-out on public screens), which the rules allow.
 
-## Evidence against (strongest first)
+## Evidence against, at the proxy stage (before the official H1 run)
 
 1. On H1, the only line in the challenge's 10x Flex chemistry, the gain over B5-direction is not significant
    (+0.009, interval −0.023 to +0.040), and only 38 % of H1 knockdowns improve.
